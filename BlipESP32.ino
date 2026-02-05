@@ -58,7 +58,7 @@
 
 // === ENUMS ===
 enum Mood { HAPPY, ANNOYED, SLEEPY };
-enum State { IDLE, REACTING, SLEEPING, WAKING, PETTING, DANCING, PLAYING_GAME };
+enum State { IDLE, REACTING, SLEEPING, WAKING, PETTING, DANCING, GAME_MENU, PLAYING_SIMON, PLAYING_PONG };
 
 // === GLOBALS ===
 Face *face;
@@ -88,12 +88,27 @@ uint8_t ledR = 0, ledG = 150, ledB = 150;
 bool ledPulsing = false;
 float pulsePhase = 0;
 
-// Game state
+// Game state - Simon
 int gamePattern[20];
 int gameLength = 0;
 int gameInput = 0;
 int gameScore = 0;
 int gameSpeed = 500;
+
+// Game state - Pong
+float ballX, ballY;
+float ballVelX, ballVelY;
+int playerY, aiY;
+int playerScore, aiScore;
+const int PADDLE_HEIGHT = 16;
+const int PADDLE_WIDTH = 3;
+const int BALL_SIZE = 3;
+const int WIN_SCORE = 5;
+unsigned long lastPongUpdate = 0;
+const int PONG_SPEED_MS = 30;
+
+// Game menu
+int menuSelection = 0;
 
 // Sound tracking
 int lastSoundIndex[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
@@ -433,6 +448,290 @@ void gameOver() {
     currentState = IDLE;
 }
 
+// === GAME MENU ===
+void showGameMenu() {
+    currentState = GAME_MENU;
+    menuSelection = 0;
+    
+    face->RandomBlink = false;
+    face->RandomLook = false;
+    
+    playExcitedSound();
+    drawGameMenu();
+}
+
+void drawGameMenu() {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(25, 15, "Let's Play!");
+    
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    
+    // Simon option
+    if (menuSelection == 0) {
+        u8g2.drawBox(15, 25, 98, 14);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(20, 36, "> Simon Says");
+        u8g2.setDrawColor(1);
+    } else {
+        u8g2.drawStr(20, 36, "  Simon Says");
+    }
+    
+    // Pong option
+    if (menuSelection == 1) {
+        u8g2.drawBox(15, 43, 98, 14);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(20, 54, "> Pong");
+        u8g2.setDrawColor(1);
+    } else {
+        u8g2.drawStr(20, 54, "  Pong");
+    }
+    
+    u8g2.sendBuffer();
+}
+
+void handleMenuInput(int input) {
+    if (input == 0) {
+        // Top touch - change selection
+        menuSelection = (menuSelection + 1) % 2;
+        drawGameMenu();
+        delay(200);
+    } else {
+        // Back touch - select game
+        if (menuSelection == 0) {
+            startSimon();
+        } else {
+            startPong();
+        }
+    }
+}
+
+// === SIMON SAYS (renamed from startGame) ===
+void startSimon() {
+    currentState = PLAYING_SIMON;
+    gameLength = 1;
+    gameScore = 0;
+    gameSpeed = 500;
+    
+    face->Expression.GoTo_Normal();
+    
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(15, 35, "Simon Says!");
+    u8g2.sendBuffer();
+    delay(1000);
+    
+    gamePattern[0] = random(2);
+    showGamePattern();
+}
+
+// === PONG ===
+void startPong() {
+    currentState = PLAYING_PONG;
+    playerScore = 0;
+    aiScore = 0;
+    playerY = 32 - PADDLE_HEIGHT / 2;
+    aiY = 32 - PADDLE_HEIGHT / 2;
+    
+    face->Expression.GoTo_Focused();
+    
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(35, 35, "Pong!");
+    u8g2.sendBuffer();
+    delay(1000);
+    
+    resetBall(true);
+    lastPongUpdate = millis();
+}
+
+void resetBall(bool towardsPlayer) {
+    ballX = 64;
+    ballY = 32;
+    ballVelX = towardsPlayer ? -2.5 : 2.5;
+    ballVelY = random(-15, 16) / 10.0;
+}
+
+void updatePong(bool topHeld, bool backHeld) {
+    unsigned long now = millis();
+    if (now - lastPongUpdate < PONG_SPEED_MS) return;
+    lastPongUpdate = now;
+    
+    // Player paddle movement
+    if (topHeld && playerY > 0) {
+        playerY -= 3;
+    }
+    if (backHeld && playerY < 64 - PADDLE_HEIGHT) {
+        playerY += 3;
+    }
+    
+    // Simple AI - follow ball with some delay
+    int aiTarget = ballY - PADDLE_HEIGHT / 2;
+    if (aiY < aiTarget - 2) {
+        aiY += 2;
+    } else if (aiY > aiTarget + 2) {
+        aiY -= 2;
+    }
+    aiY = constrain(aiY, 0, 64 - PADDLE_HEIGHT);
+    
+    // Ball movement
+    ballX += ballVelX;
+    ballY += ballVelY;
+    
+    // Top/bottom bounce
+    if (ballY <= 0 || ballY >= 64 - BALL_SIZE) {
+        ballVelY = -ballVelY;
+        ballY = constrain(ballY, 0, 64 - BALL_SIZE);
+    }
+    
+    // Player paddle collision (left side)
+    if (ballX <= PADDLE_WIDTH + 4 && ballX > 0) {
+        if (ballY + BALL_SIZE >= playerY && ballY <= playerY + PADDLE_HEIGHT) {
+            ballVelX = abs(ballVelX) * 1.05;  // Speed up slightly
+            ballVelX = min(ballVelX, 5.0f);
+            // Add spin based on where it hit the paddle
+            float hitPos = (ballY - playerY) / (float)PADDLE_HEIGHT;
+            ballVelY = (hitPos - 0.5) * 4;
+            ballX = PADDLE_WIDTH + 5;
+        }
+    }
+    
+    // AI paddle collision (right side)
+    if (ballX >= 128 - PADDLE_WIDTH - 4 - BALL_SIZE && ballX < 128) {
+        if (ballY + BALL_SIZE >= aiY && ballY <= aiY + PADDLE_HEIGHT) {
+            ballVelX = -abs(ballVelX) * 1.05;
+            ballVelX = max(ballVelX, -5.0f);
+            float hitPos = (ballY - aiY) / (float)PADDLE_HEIGHT;
+            ballVelY = (hitPos - 0.5) * 4;
+            ballX = 128 - PADDLE_WIDTH - 5 - BALL_SIZE;
+        }
+    }
+    
+    // Scoring
+    if (ballX <= 0) {
+        // AI scores
+        aiScore++;
+        pongAIScored();
+        if (aiScore >= WIN_SCORE) {
+            pongGameOver(false);
+            return;
+        }
+        resetBall(true);
+    }
+    else if (ballX >= 128) {
+        // Player scores
+        playerScore++;
+        pongPlayerScored();
+        if (playerScore >= WIN_SCORE) {
+            pongGameOver(true);
+            return;
+        }
+        resetBall(false);
+    }
+    
+    // LED intensity based on ball speed
+    int intensity = map(abs(ballVelX) * 10, 25, 50, 80, 255);
+    setAllLEDs(0, intensity, intensity);
+    
+    drawPong();
+}
+
+void drawPong() {
+    u8g2.clearBuffer();
+    
+    // Scores
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    char buf[8];
+    sprintf(buf, "%d", playerScore);
+    u8g2.drawStr(25, 10, buf);
+    sprintf(buf, "%d", aiScore);
+    u8g2.drawStr(98, 10, buf);
+    
+    // Center line (dashed)
+    for (int y = 0; y < 64; y += 8) {
+        u8g2.drawBox(63, y, 2, 4);
+    }
+    
+    // Paddles
+    u8g2.drawBox(2, playerY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    u8g2.drawBox(128 - PADDLE_WIDTH - 2, aiY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    
+    // Ball
+    u8g2.drawBox((int)ballX, (int)ballY, BALL_SIZE, BALL_SIZE);
+    
+    u8g2.sendBuffer();
+}
+
+void pongPlayerScored() {
+    flashLEDs(0, 255, 0, 200);
+    face->Expression.GoTo_Happy();
+    face->Update();
+    playHappySound();
+    delay(500);
+    face->Expression.GoTo_Focused();
+}
+
+void pongAIScored() {
+    flashLEDs(255, 0, 0, 200);
+    face->Expression.GoTo_Angry();
+    face->Update();
+    playAnnoyedSound();
+    delay(500);
+    face->Expression.GoTo_Focused();
+}
+
+void pongGameOver(bool playerWon) {
+    face->RandomBlink = true;
+    face->RandomLook = true;
+    
+    if (playerWon) {
+        // Victory dance!
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB10_tr);
+        u8g2.drawStr(25, 35, "You Win!");
+        u8g2.sendBuffer();
+        
+        playExcitedSound();
+        face->Expression.GoTo_Happy();
+        
+        for (int i = 0; i < 5; i++) {
+            setAllLEDs(0, 255, 0);
+            delay(100);
+            setAllLEDs(255, 255, 0);
+            delay(100);
+        }
+    } else {
+        // Sore loser!
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_ncenB10_tr);
+        u8g2.drawStr(30, 30, "I Win!");
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        u8g2.drawStr(25, 48, "Hehe! >:)");
+        u8g2.sendBuffer();
+        
+        playExcitedSound();  // Smug celebration
+        face->Expression.GoTo_Happy();
+        
+        for (int i = 0; i < 3; i++) {
+            setAllLEDs(255, 0, 255);
+            delay(150);
+            setAllLEDs(0, 0, 0);
+            delay(150);
+        }
+        
+        delay(1000);
+        
+        // Player is sad
+        face->Expression.GoTo_Sad();
+        face->Update();
+        delay(500);
+    }
+    
+    delay(2000);
+    setMoodHappy();
+    currentState = IDLE;
+}
+
 // === TOUCH HANDLERS ===
 void processTopTouch(bool pressed) {
     unsigned long now = millis();
@@ -472,7 +771,7 @@ void processTopTouch(bool pressed) {
         // Check for triple tap
         if (topTapCount >= 3) {
             topTapCount = 0;
-            startGame();
+            showGameMenu();
             return;
         }
         
@@ -615,21 +914,45 @@ void loop() {
     
     audio.loop();
     
-    // Game mode has its own input handling
-    if (currentState == PLAYING_GAME) {
+    // Game menu input
+    if (currentState == GAME_MENU) {
         if (topPressed && !topWasPressed) {
             topWasPressed = true;
-            handleGameInput(0);  // Top = 0
+            handleMenuInput(0);  // Top = change selection
         } else if (!topPressed) {
             topWasPressed = false;
         }
         
         if (backPressed && !backWasPressed) {
             backWasPressed = true;
-            handleGameInput(1);  // Back = 1
+            handleMenuInput(1);  // Back = select
         } else if (!backPressed) {
             backWasPressed = false;
         }
+        return;
+    }
+    
+    // Simon game input
+    if (currentState == PLAYING_SIMON) {
+        if (topPressed && !topWasPressed) {
+            topWasPressed = true;
+            handleGameInput(0);
+        } else if (!topPressed) {
+            topWasPressed = false;
+        }
+        
+        if (backPressed && !backWasPressed) {
+            backWasPressed = true;
+            handleGameInput(1);
+        } else if (!backPressed) {
+            backWasPressed = false;
+        }
+        return;
+    }
+    
+    // Pong game - continuous input
+    if (currentState == PLAYING_PONG) {
+        updatePong(topPressed, backPressed);
         return;
     }
     
