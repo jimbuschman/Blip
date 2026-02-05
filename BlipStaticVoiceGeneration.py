@@ -2,6 +2,7 @@
 ESP32 Droid Voice Generator
 
 Generates optimized robot voice clips for ESP32 flash storage.
+Uses Microsoft Edge TTS for more expressive voices.
 Outputs: 16kHz, 8-bit unsigned mono WAV (~16KB per second)
 
 Usage:
@@ -11,49 +12,60 @@ Usage:
 
 import os
 import sys
+import asyncio
+import warnings
 from pathlib import Path
 from typing import Optional
 import numpy as np
 
+# Suppress librosa warnings about short audio chunks
+warnings.filterwarnings("ignore", message="n_fft=.*is too large")
+
 try:
-    import pyttsx3
+    import edge_tts
     import librosa
     import soundfile as sf
     from scipy.io import wavfile
 except ImportError as e:
     print(f"Missing dependency: {e}")
-    print("Install with: pip install pyttsx3 librosa soundfile scipy")
+    print("Install with: pip install edge-tts librosa soundfile scipy numpy")
     sys.exit(1)
 
 
 # === CONFIGURATION ===
 OUTPUT_DIR = Path("./droid_sounds")
-SAMPLE_RATE = 16000      # 16kHz (half of original, saves space)
-BIT_DEPTH = 8            # 8-bit (half of 16-bit, saves more space)
-PITCH_SHIFT_STEPS = 4    # Shift pitch up for robot sound
-SPEECH_RATE = 150        # Words per minute
+SAMPLE_RATE = 16000      # 16kHz output
+PITCH_SHIFT_STEPS = 8    # Shift pitch up for robot sound (6-8 is Cozmo-like)
+SPEED_RATE = 1.12        # Slightly faster for energy
+
+# Edge TTS voice - try these for different feels:
+# "en-US-GuyNeural" - male, friendly
+# "en-US-ChristopherNeural" - male, warm  
+# "en-US-EricNeural" - male, cheerful
+# "en-US-JennyNeural" - female, friendly
+VOICE = "en-US-EricNeural"
+
+# Inflection settings
+ADD_END_INFLECTION = True
+INFLECTION_AMOUNT = 5      # Semitones to bend up at end
+INFLECTION_DURATION = 0.15 # Last 15% of audio gets bent up
 
 
 # === PHRASE LIBRARY ===
-# Organized by category to match ESP32 droid firmware
-# Keep phrases SHORT (under 2 seconds) to save space
-
 PHRASES = {
-    # Touch top, pet mode, scoring in Pong
     "happy": [
-        "Hehe!",
+        "Hahaha!",
         "Yay!",
-        "That tickles!",
-        "Ooh I like that!",
-        "Wee!",
-        "That's nice!",
-        "Hee hee!",
+        #"That tickles!",
+        #"Ooh I like that!",
+        "Weeee!",
+        #"That's nice!",
+        #"Hee hee!",
         "Oh boy!",
-        "Yippee!",
+        "Yippeeeee!",
         "Mmm!",
     ],
     
-    # Touch spam, AI scores in Pong, Simon game over
     "annoyed": [
         "Hey!",
         "Stop it!",
@@ -67,29 +79,26 @@ PHRASES = {
         "No no no!",
     ],
     
-    # Touch back (startled)
     "surprised": [
         "Whoa!",
-        "Huh?",
-        "What the?",
+        "Huhh?",
+        "What the what?",
         "Oh!",
         "Eep!",
-        "Ahh!",
+        "Eak!",
         "Hey!",
         "Woah!",
     ],
     
-    # Going to sleep (dark detected)
     "sleepy": [
         "So sleepy...",
         "Yawn...",
         "Night night...",
         "Getting dark...",
         "Sleepy time...",
-        "Zzz...",
+        #"Zzz...",
     ],
     
-    # Waking up, startup
     "wake": [
         "Good morning!",
         "I'm awake!",
@@ -101,7 +110,6 @@ PHRASES = {
         "Oh hi!",
     ],
     
-    # Random idle chirps
     "idle": [
         "Hmm...",
         "Doo dee doo...",
@@ -115,7 +123,6 @@ PHRASES = {
         "Hm?",
     ],
     
-    # Dance, game menu, winning games
     "excited": [
         "Wow!",
         "Woohoo!",
@@ -126,7 +133,7 @@ PHRASES = {
         "Oh yeah!",
         "Woo!",
         "Yes!",
-        "Haha!",
+        "Cool!",
     ],
 }
 
@@ -135,99 +142,122 @@ class DroidVoiceGenerator:
     """Generates optimized robot voice clips for ESP32"""
     
     def __init__(self):
-        self._engine = None
         self._temp_dir = Path("./temp_audio")
         self._temp_dir.mkdir(exist_ok=True)
-        self._init_engine()
+        print(f"Using voice: {VOICE}")
+        print(f"Pitch shift: +{PITCH_SHIFT_STEPS} semitones")
+        if ADD_END_INFLECTION:
+            print(f"End inflection: +{INFLECTION_AMOUNT} semitones")
     
-    def _init_engine(self):
-        """Initialize TTS engine"""
+    async def _generate_raw_tts(self, text: str, output_path: Path) -> bool:
+        """Generate TTS using Edge TTS"""
         try:
-            self._engine = pyttsx3.init()
-            self._engine.setProperty('rate', SPEECH_RATE)
-            
-            # Try to find a good voice
-            voices = self._engine.getProperty('voices')
-            for voice in voices:
-                if 'david' in voice.name.lower() or 'male' in voice.name.lower():
-                    self._engine.setProperty('voice', voice.id)
-                    print(f"Using voice: {voice.name}")
-                    break
-            
-            print("TTS engine initialized")
-        except Exception as e:
-            print(f"Failed to init TTS: {e}")
-            self._engine = None
-    
-    def _generate_raw_tts(self, text: str) -> Optional[str]:
-        """Generate raw TTS to temp file"""
-        if not self._engine:
-            return None
-        
-        temp_path = self._temp_dir / "raw.wav"
-        try:
-            self._engine.save_to_file(text, str(temp_path))
-            self._engine.runAndWait()
-            return str(temp_path)
+            communicate = edge_tts.Communicate(text, VOICE)
+            await communicate.save(str(output_path))
+            return True
         except Exception as e:
             print(f"TTS failed: {e}")
-            return None
+            return False
+    
+    def _add_inflection(self, y: np.ndarray, sr: int) -> np.ndarray:
+        """Add upward pitch bend at the end of the audio"""
+        if not ADD_END_INFLECTION:
+            return y
+        
+        # Calculate where inflection starts
+        inflection_samples = int(len(y) * INFLECTION_DURATION)
+        if inflection_samples < 100:
+            return y
+        
+        # Split audio
+        main_part = y[:-inflection_samples]
+        end_part = y[-inflection_samples:]
+        
+        # Create pitch bend envelope (0 to INFLECTION_AMOUNT)
+        bend_envelope = np.linspace(0, INFLECTION_AMOUNT, len(end_part))
+        
+        # Apply gradual pitch shift to end part
+        # We'll do this by processing small chunks with increasing pitch
+        chunk_size = len(end_part) // 10
+        processed_end = []
+        
+        for i in range(10):
+            start = i * chunk_size
+            end = start + chunk_size if i < 9 else len(end_part)
+            chunk = end_part[start:end]
+            
+            # Average pitch shift for this chunk
+            avg_shift = bend_envelope[start:end].mean()
+            
+            if len(chunk) > 100:
+                shifted = librosa.effects.pitch_shift(chunk, sr=sr, n_steps=avg_shift)
+                processed_end.append(shifted)
+            else:
+                processed_end.append(chunk)
+        
+        end_processed = np.concatenate(processed_end)
+        
+        return np.concatenate([main_part, end_processed])
     
     def _apply_robot_effects(self, input_path: str) -> Optional[np.ndarray]:
-        """Apply pitch shift and effects, return processed audio"""
+        """Apply pitch shift and effects"""
         try:
             # Load audio
             y, sr = librosa.load(input_path, sr=None)
             
-            # Pitch shift up for robot sound
-            y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=PITCH_SHIFT_STEPS)
+            # Speed up slightly for more energy
+            y = librosa.effects.time_stretch(y, rate=SPEED_RATE)
             
-            # Slight time stretch for robotic feel
-            y_stretched = librosa.effects.time_stretch(y_shifted, rate=1.1)
+            # Main pitch shift for robot sound
+            y = librosa.effects.pitch_shift(y, sr=sr, n_steps=PITCH_SHIFT_STEPS)
+            
+            # Add end inflection
+            y = self._add_inflection(y, sr)
             
             # Resample to target rate
-            y_resampled = librosa.resample(y_stretched, orig_sr=sr, target_sr=SAMPLE_RATE)
+            y = librosa.resample(y, orig_sr=sr, target_sr=SAMPLE_RATE)
             
             # Normalize
-            y_normalized = librosa.util.normalize(y_resampled)
+            y = librosa.util.normalize(y)
             
-            return y_normalized
+            return y
         except Exception as e:
             print(f"Effects processing failed: {e}")
             return None
     
     def _save_optimized(self, audio: np.ndarray, output_path: Path):
         """Save as 8-bit unsigned WAV for ESP32"""
-        # Convert float [-1, 1] to uint8 [0, 255]
-        # 8-bit WAV uses unsigned with 128 as center
         audio_clipped = np.clip(audio, -1, 1)
         audio_uint8 = ((audio_clipped + 1) * 127.5).astype(np.uint8)
-        
-        # Write WAV file
         wavfile.write(str(output_path), SAMPLE_RATE, audio_uint8)
         
-        # Report size
         size_kb = output_path.stat().st_size / 1024
         duration = len(audio) / SAMPLE_RATE
         print(f"    -> {output_path.name} ({size_kb:.1f}KB, {duration:.1f}s)")
     
-    def generate_clip(self, text: str, output_path: Path) -> bool:
+    async def generate_clip(self, text: str, output_path: Path) -> bool:
         """Generate a single voice clip"""
-        # Step 1: Raw TTS
-        raw_path = self._generate_raw_tts(text)
-        if not raw_path:
+        temp_path = self._temp_dir / "temp_tts.mp3"
+        
+        # Step 1: Generate TTS
+        if not await self._generate_raw_tts(text, temp_path):
             return False
         
         # Step 2: Apply effects
-        audio = self._apply_robot_effects(raw_path)
+        audio = self._apply_robot_effects(str(temp_path))
         if audio is None:
             return False
         
         # Step 3: Save optimized
         self._save_optimized(audio, output_path)
+        
+        # Cleanup temp
+        if temp_path.exists():
+            temp_path.unlink()
+        
         return True
     
-    def generate_all_phrases(self):
+    async def generate_all_phrases(self):
         """Generate all phrases from the library"""
         OUTPUT_DIR.mkdir(exist_ok=True)
         
@@ -240,13 +270,11 @@ class DroidVoiceGenerator:
             category_dir.mkdir(exist_ok=True)
             
             for i, phrase in enumerate(phrases):
-                # Simple filename to match ESP32 firmware expectations
-                # e.g., happy_01.wav, happy_02.wav
                 filename = f"{category}_{i+1:02d}.wav"
                 output_path = category_dir / filename
                 
                 print(f"  [{i+1:02d}] \"{phrase}\"")
-                if self.generate_clip(phrase, output_path):
+                if await self.generate_clip(phrase, output_path):
                     total_size += output_path.stat().st_size
                     total_clips += 1
         
@@ -254,7 +282,8 @@ class DroidVoiceGenerator:
         print(f"Generated {total_clips} clips")
         print(f"Total size: {total_size/1024:.1f}KB ({total_size/1024/1024:.2f}MB)")
         print(f"Output directory: {OUTPUT_DIR.absolute()}")
-        print(f"\nUpload the '{OUTPUT_DIR.name}' folder contents to ESP32 LittleFS")
+        print(f"\nCopy contents to your Arduino sketch's 'data' folder")
+        print(f"Then upload using 'ESP32 LittleFS Data Upload'")
     
     def cleanup(self):
         """Remove temp files"""
@@ -266,7 +295,7 @@ class DroidVoiceGenerator:
             pass
 
 
-def main():
+async def main():
     generator = DroidVoiceGenerator()
     
     if len(sys.argv) > 1:
@@ -276,16 +305,16 @@ def main():
         safe_name = "".join(c if c.isalnum() else "_" for c in text[:30])
         output_path = OUTPUT_DIR / f"custom_{safe_name}.wav"
         print(f"Generating: \"{text}\"")
-        generator.generate_clip(text, output_path)
+        await generator.generate_clip(text, output_path)
     else:
         # Generate all phrases
         print("ESP32 Droid Voice Generator")
-        print(f"Output format: {SAMPLE_RATE}Hz, {BIT_DEPTH}-bit mono")
-        print(f"~{SAMPLE_RATE * BIT_DEPTH // 8 // 1024}KB per second of audio")
-        generator.generate_all_phrases()
+        print(f"Output: {SAMPLE_RATE}Hz, 8-bit mono (~16KB/sec)")
+        print("="*40)
+        await generator.generate_all_phrases()
     
     generator.cleanup()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
