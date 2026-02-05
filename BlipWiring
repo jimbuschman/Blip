@@ -1,0 +1,167 @@
+# ESP32 Droid Wiring Diagram
+
+## Power Rails
+```
+USB ──► ESP32 5V pin ──► 5V rail
+        ESP32 3V3 pin ──► 3.3V rail
+        ESP32 GND     ──► GND rail (common ground!)
+```
+
+## Pin Summary
+| GPIO | Component | Notes |
+|------|-----------|-------|
+| 21 | OLED SDA | I2C data |
+| 22 | OLED SCL | I2C clock |
+| 13 | LED Data | WS2812B |
+| 25 | I2S DIN | Audio data |
+| 26 | I2S BCLK | Audio clock |
+| 27 | I2S LRC | Audio L/R |
+| 4 | Touch Top | TTP223 |
+| 15 | Touch Back | TTP223 |
+| 34 | Light Sensor | ADC input |
+
+---
+
+## Wiring Detail
+
+### OLED Display (3.3V I2C)
+```
+SSD1306        ESP32
+───────        ─────
+VCC    ──────► 3.3V
+GND    ──────► GND
+SDA    ──────► GPIO 21
+SCL    ──────► GPIO 22
+```
+
+### WS2812B LEDs x3 (5V)
+```
+LED Strip      ESP32
+─────────      ─────
+VCC      ────► 5V
+GND      ────► GND
+DIN      ────► GPIO 13
+
+Wire LEDs in series: ESP32 → LED1 → LED2 → LED3
+```
+
+### MAX98357 Audio Amp
+```
+MAX98357       ESP32
+────────       ─────
+VIN      ────► 5V
+GND      ────► GND
+DIN      ────► GPIO 25
+BCLK     ────► GPIO 26
+LRC      ────► GPIO 27
+SD       ────► 3.3V (or leave floating to enable)
+GAIN     ────► (leave floating = 9dB)
+
+Speaker connects to + and - terminals on MAX98357
+```
+
+### Touch Sensors (3.3V)
+```
+TTP223 (Top)   ESP32
+────────────   ─────
+VCC      ────► 3.3V
+GND      ────► GND
+OUT      ────► GPIO 4
+
+TTP223 (Back)  ESP32
+─────────────  ─────
+VCC      ────► 3.3V
+GND      ────► GND
+OUT      ────► GPIO 15
+```
+
+### Light Sensor (Voltage Divider)
+```
+3.3V ────┬──── LDR ────┬──── GND
+         │             │
+         │             └─── 10K resistor ─── GND
+         │                       │
+         └───────────────────────┴──► GPIO 34
+```
+**Simpler view:**
+```
+3.3V ── LDR ──┬── 10K ── GND
+              │
+              └──► GPIO 34
+```
+
+---
+
+## Complete Schematic (ASCII)
+```
+                            ┌─────────────────┐
+                            │   ESP32 D1 Mini │
+                            │                 │
+    ┌───────────┐           │  5V ──┬─────────┼──► LEDs VCC, Amp VIN
+    │  USB      │──► 5V ───►│       │         │
+    │  Power    │           │ 3V3 ──┼─────────┼──► OLED VCC, Touch VCC, LDR, Amp SD
+    └───────────┘           │       │         │
+                            │ GND ──┼─────────┼──► All GNDs (common)
+                            │       │         │
+                            │ G21 ──┼─────────┼──► OLED SDA
+                            │ G22 ──┼─────────┼──► OLED SCL
+                            │       │         │
+                            │ G13 ──┼─────────┼──► LED Data In
+                            │       │         │
+                            │ G25 ──┼─────────┼──► Amp DIN
+                            │ G26 ──┼─────────┼──► Amp BCLK
+                            │ G27 ──┼─────────┼──► Amp LRC
+                            │       │         │
+                            │  G4 ──┼─────────┼──► Touch Top OUT
+                            │ G15 ──┼─────────┼──► Touch Back OUT
+                            │       │         │
+                            │ G34 ──┼─────────┼──► LDR junction
+                            │       │         │
+                            └───────┴─────────┘
+```
+
+---
+
+## Notes
+
+1. **Common Ground**: All GNDs must connect together
+
+2. **LED Level Shifting**: WS2812B wants 5V logic but usually works with 3.3V GPIO. If LEDs are glitchy, add a level shifter on GPIO 13
+
+3. **LDR Resistor Value**: 10K is a starting point. Adjust based on your LDR:
+   - More sensitive to darkness: use larger resistor (47K)
+   - More sensitive to brightness: use smaller resistor (4.7K)
+
+4. **Amp SD Pin**: 
+   - Floating or HIGH = enabled
+   - LOW = shutdown (muted)
+
+5. **Touch Sensor Modes**: TTP223 modules sometimes have a jumper to toggle between momentary/toggle mode. Make sure it's set to **momentary**
+
+## Parts List
+- ESP32 D1 Mini
+- SSD1306 128x64 OLED (I2C, blue)
+- WS2812B LEDs x3 (or strip of 3)
+- MAX98357 I2S amplifier
+- 1W 8Ω speaker
+- TTP223 touch sensor x2
+- LDR/photocell
+- 10K resistor
+- Wires, breadboard/PCB
+
+Key things to watch out for:
+Power:
+
+5V rail: LEDs + Amp power (from USB via ESP32)
+3.3V rail: OLED + Touch sensors + LDR (from ESP32 regulator)
+All GNDs connected together — this is critical
+
+Common gotchas:
+
+LDR orientation doesn't matter — it's just a resistor
+Touch sensors — check they're set to momentary mode, not toggle
+LEDs — data flows one direction (arrow on strip), connect to DIN not DOUT
+Amp SD pin — leave floating or tie to 3.3V to enable, don't leave it LOW or no sound
+
+Do you have a 10K resistor for the light sensor? If not, anything from 4.7K to 47K will work
+you'll just need to adjust DARK_LEVEL and BRIGHT_LEVEL in the code based on what readings you get.
