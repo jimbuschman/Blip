@@ -8,7 +8,16 @@
  *   - TTP223 Touch x2 (GPIO 4 top, GPIO 15 back)
  *   - Light sensor/LDR (GPIO 34)
  * 
- * Uses esp32-eyes library for face animations
+ * Interactions:
+ *   - Touch top: happy reaction
+ *   - Touch top (spam): annoyed
+ *   - Touch top (hold 1s): pet mode
+ *   - Touch top (hold 2s): sleep
+ *   - Touch top (triple-tap): Simon Says game
+ *   - Touch back: surprised
+ *   - Double-tap back: dance
+ *   - Dark: sleepy → sleep
+ *   - Light: wake up
  ****************************************************/
 
 #include <Wire.h>
@@ -16,11 +25,14 @@
 #include <FS.h>
 #include <LittleFS.h>
 #include "Face.h"
-#include "Audio.h"  // ESP32-audioI2S library
+#include "Audio.h"
 
 // === PIN DEFINITIONS ===
 #define LED_PIN         13
 #define NUM_LEDS        3
+#define LED_LEFT        0
+#define LED_MID         1
+#define LED_RIGHT       2
 
 #define I2S_DOUT        25
 #define I2S_BCLK        26
@@ -28,22 +40,25 @@
 
 #define TOUCH_TOP_PIN   4
 #define TOUCH_BACK_PIN  15
-
 #define LIGHT_SENSOR_PIN 34
 
 // === THRESHOLDS & TIMING ===
-#define DARK_LEVEL          800     // ADC value (lower = darker)
-#define BRIGHT_LEVEL        2000    // ADC value (higher = brighter)
-#define TOUCH_DEBOUNCE_MS   200
+#define DARK_LEVEL          800
+#define BRIGHT_LEVEL        2000
+#define TOUCH_DEBOUNCE_MS   150
+#define LONG_PRESS_MS       2000
+#define PET_HOLD_MS         1000
+#define DOUBLE_TAP_MS       400
+#define TRIPLE_TAP_MS       500
 #define SPAM_WINDOW_MS      2000
-#define SPAM_TOUCH_COUNT    3
+#define SPAM_TOUCH_COUNT    4
 #define LIGHT_CHECK_MS      1000
-#define IDLE_CHIRP_CHANCE   5       // % chance per 5 seconds
+#define IDLE_CHIRP_CHANCE   5
 #define IDLE_CHIRP_INTERVAL 5000
 
 // === ENUMS ===
 enum Mood { HAPPY, ANNOYED, SLEEPY };
-enum State { IDLE, REACTING, SLEEPING, WAKING };
+enum State { IDLE, REACTING, SLEEPING, WAKING, PETTING, DANCING, PLAYING_GAME };
 
 // === GLOBALS ===
 Face *face;
@@ -54,68 +69,56 @@ Mood currentMood = HAPPY;
 State currentState = IDLE;
 
 // Touch tracking
-unsigned long lastTopTouch = 0;
-unsigned long lastBackTouch = 0;
+unsigned long topPressStart = 0;
+unsigned long topReleaseTime = 0;
+unsigned long backReleaseTime = 0;
+int topTapCount = 0;
+int backTapCount = 0;
 int recentTopTouches = 0;
 unsigned long topTouchWindow = 0;
+bool topWasPressed = false;
+bool backWasPressed = false;
 
 // Timing
 unsigned long lastLightCheck = 0;
 unsigned long lastIdleChirp = 0;
-unsigned long lastBlinkTime = 0;
-unsigned long sleepStartTime = 0;
 
 // LED state
-uint8_t ledR = 0, ledG = 150, ledB = 150;  // Cyan default
+uint8_t ledR = 0, ledG = 150, ledB = 150;
 bool ledPulsing = false;
 float pulsePhase = 0;
 
-// Sound tracking (avoid repeats)
+// Game state
+int gamePattern[20];
+int gameLength = 0;
+int gameInput = 0;
+int gameScore = 0;
+int gameSpeed = 500;
+
+// Sound tracking
 int lastSoundIndex[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 
 // === SOUND CATEGORIES ===
-const char* happySounds[] = {
-    "/happy/happy_01.wav",
-    "/happy/happy_02.wav",
-    "/happy/happy_03.wav",
-    "/happy/happy_04.wav"
-};
+const char* happySounds[] = {"/happy/happy_01.wav", "/happy/happy_02.wav", "/happy/happy_03.wav", "/happy/happy_04.wav"};
 const int numHappySounds = 4;
 
-const char* annoyedSounds[] = {
-    "/annoyed/annoyed_01.wav",
-    "/annoyed/annoyed_02.wav",
-    "/annoyed/annoyed_03.wav"
-};
+const char* annoyedSounds[] = {"/annoyed/annoyed_01.wav", "/annoyed/annoyed_02.wav", "/annoyed/annoyed_03.wav"};
 const int numAnnoyedSounds = 3;
 
-const char* surprisedSounds[] = {
-    "/surprised/surprised_01.wav",
-    "/surprised/surprised_02.wav",
-    "/surprised/surprised_03.wav"
-};
+const char* surprisedSounds[] = {"/surprised/surprised_01.wav", "/surprised/surprised_02.wav", "/surprised/surprised_03.wav"};
 const int numSurprisedSounds = 3;
 
-const char* sleepySounds[] = {
-    "/sleepy/sleepy_01.wav",
-    "/sleepy/sleepy_02.wav"
-};
+const char* sleepySounds[] = {"/sleepy/sleepy_01.wav", "/sleepy/sleepy_02.wav"};
 const int numSleepySounds = 2;
 
-const char* wakeSounds[] = {
-    "/wake/wake_01.wav",
-    "/wake/wake_02.wav",
-    "/wake/wake_03.wav"
-};
+const char* wakeSounds[] = {"/wake/wake_01.wav", "/wake/wake_02.wav", "/wake/wake_03.wav"};
 const int numWakeSounds = 3;
 
-const char* idleSounds[] = {
-    "/idle/idle_01.wav",
-    "/idle/idle_02.wav",
-    "/idle/idle_03.wav",
-    "/idle/idle_04.wav"
-};
+const char* idleSounds[] = {"/idle/idle_01.wav", "/idle/idle_02.wav", "/idle/idle_03.wav", "/idle/idle_04.wav"};
 const int numIdleSounds = 4;
+
+const char* excitedSounds[] = {"/excited/excited_01.wav", "/excited/excited_02.wav", "/excited/excited_03.wav"};
+const int numExcitedSounds = 3;
 
 // === SOUND FUNCTIONS ===
 int pickRandomSound(int category, int numSounds) {
@@ -138,67 +141,56 @@ void playSound(const char* path) {
     }
 }
 
-void playHappySound() {
-    int i = pickRandomSound(0, numHappySounds);
-    playSound(happySounds[i]);
-}
+void playHappySound() { playSound(happySounds[pickRandomSound(0, numHappySounds)]); }
+void playAnnoyedSound() { playSound(annoyedSounds[pickRandomSound(1, numAnnoyedSounds)]); }
+void playSurprisedSound() { playSound(surprisedSounds[pickRandomSound(2, numSurprisedSounds)]); }
+void playSleepySound() { playSound(sleepySounds[pickRandomSound(3, numSleepySounds)]); }
+void playWakeSound() { playSound(wakeSounds[pickRandomSound(4, numWakeSounds)]); }
+void playIdleSound() { playSound(idleSounds[pickRandomSound(5, numIdleSounds)]); }
+void playExcitedSound() { playSound(excitedSounds[pickRandomSound(6, numExcitedSounds)]); }
 
-void playAnnoyedSound() {
-    int i = pickRandomSound(1, numAnnoyedSounds);
-    playSound(annoyedSounds[i]);
-}
-
-void playSurprisedSound() {
-    int i = pickRandomSound(2, numSurprisedSounds);
-    playSound(surprisedSounds[i]);
-}
-
-void playSleepySound() {
-    int i = pickRandomSound(3, numSleepySounds);
-    playSound(sleepySounds[i]);
-}
-
-void playWakeSound() {
-    int i = pickRandomSound(4, numWakeSounds);
-    playSound(wakeSounds[i]);
-}
-
-void playIdleSound() {
-    int i = pickRandomSound(5, numIdleSounds);
-    playSound(idleSounds[i]);
+void playTone(int freq, int duration) {
+    // Simple beep via audio library or just LED flash if no tone file
+    // For now, just visual feedback
 }
 
 // === LED FUNCTIONS ===
 void setLEDColor(uint8_t r, uint8_t g, uint8_t b, bool pulse = false) {
-    ledR = r;
-    ledG = g;
-    ledB = b;
+    ledR = r; ledG = g; ledB = b;
     ledPulsing = pulse;
 }
 
+void setAllLEDs(uint8_t r, uint8_t g, uint8_t b) {
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds.setPixelColor(i, leds.Color(r, g, b));
+    }
+    leds.show();
+}
+
+void setSingleLED(int index, uint8_t r, uint8_t g, uint8_t b) {
+    leds.setPixelColor(index, leds.Color(r, g, b));
+    leds.show();
+}
+
 void updateLEDs() {
+    if (currentState == PLAYING_GAME) return;  // Game controls LEDs directly
+    
     uint8_t r = ledR, g = ledG, b = ledB;
     
     if (ledPulsing) {
         pulsePhase += 0.05;
         float brightness = (sin(pulsePhase) + 1.0) / 2.0;
-        brightness = 0.3 + brightness * 0.7;  // Range 0.3 to 1.0
+        brightness = 0.3 + brightness * 0.7;
         r = ledR * brightness;
         g = ledG * brightness;
         b = ledB * brightness;
     }
     
-    for (int i = 0; i < NUM_LEDS; i++) {
-        leds.setPixelColor(i, leds.Color(r, g, b));
-    }
-    leds.show();
+    setAllLEDs(r, g, b);
 }
 
 void flashLEDs(uint8_t r, uint8_t g, uint8_t b, int duration = 150) {
-    for (int i = 0; i < NUM_LEDS; i++) {
-        leds.setPixelColor(i, leds.Color(r, g, b));
-    }
-    leds.show();
+    setAllLEDs(r, g, b);
     delay(duration);
 }
 
@@ -206,134 +198,365 @@ void flashLEDs(uint8_t r, uint8_t g, uint8_t b, int duration = 150) {
 void setMoodHappy() {
     currentMood = HAPPY;
     face->Expression.GoTo_Happy();
-    setLEDColor(0, 150, 150, true);  // Cyan pulse
+    setLEDColor(0, 150, 150, true);
 }
 
 void setMoodAnnoyed() {
     currentMood = ANNOYED;
     face->Expression.GoTo_Angry();
-    setLEDColor(255, 100, 0, false);  // Orange solid
+    setLEDColor(255, 100, 0, false);
 }
 
 void setMoodSleepy() {
     currentMood = SLEEPY;
     face->Expression.GoTo_Sleepy();
-    setLEDColor(0, 0, 80, false);  // Dim blue solid
+    setLEDColor(0, 0, 80, false);
 }
 
+// === SLEEP / WAKE ===
 void goToSleep() {
     currentState = SLEEPING;
     playSleepySound();
     
-    // Animate to sleep
     face->Expression.GoTo_Sleepy();
+    face->Update();
     delay(1000);
     
-    // Turn off LEDs
-    setLEDColor(0, 0, 0, false);
+    setAllLEDs(0, 0, 0);
     
-    // Close eyes (draw flat lines)
+    // Draw closed eyes
     u8g2.clearBuffer();
-    u8g2.drawBox(20, 30, 36, 4);   // Left eye closed
-    u8g2.drawBox(72, 30, 36, 4);   // Right eye closed
+    u8g2.drawBox(20, 30, 36, 4);
+    u8g2.drawBox(72, 30, 36, 4);
     u8g2.sendBuffer();
-    
-    sleepStartTime = millis();
 }
 
 void wakeUp() {
     currentState = WAKING;
-    
-    // Flash LEDs
     flashLEDs(255, 255, 255, 100);
-    
-    // Play wake sound
     playWakeSound();
-    
-    // Wake up face animation
     face->Expression.GoTo_Surprised();
     delay(500);
+    setMoodHappy();
+    currentState = IDLE;
+}
+
+// === PET MODE ===
+void startPetting() {
+    currentState = PETTING;
+    face->Expression.GoTo_Happy();
+    setLEDColor(255, 150, 50, true);  // Warm orange pulse
+    playHappySound();
+}
+
+void updatePetting() {
+    // Extra happy face, warm LEDs
+    // Continuous gentle sounds could go here
+}
+
+void stopPetting() {
+    setMoodHappy();
+    currentState = IDLE;
+}
+
+// === DANCE ===
+void doDance() {
+    currentState = DANCING;
+    playExcitedSound();
+    
+    // Wiggle animation
+    for (int i = 0; i < 4; i++) {
+        face->Expression.GoTo_Happy();
+        face->Look.LookAt(-0.8, 0);
+        face->Update();
+        setAllLEDs(255, 0, 150);  // Pink
+        delay(150);
+        
+        face->Look.LookAt(0.8, 0);
+        face->Update();
+        setAllLEDs(0, 255, 150);  // Cyan
+        delay(150);
+    }
+    
+    // Big finish
+    face->Expression.GoTo_Surprised();
+    face->Look.LookAt(0, 0);
+    face->Update();
+    flashLEDs(255, 255, 255, 200);
     
     setMoodHappy();
     currentState = IDLE;
 }
 
-// === TOUCH HANDLERS ===
-void handleTopTouch() {
-    unsigned long now = millis();
+// === SIMON SAYS GAME ===
+void startGame() {
+    currentState = PLAYING_GAME;
+    gameLength = 1;
+    gameScore = 0;
+    gameSpeed = 500;
     
-    // Debounce
-    if (now - lastTopTouch < TOUCH_DEBOUNCE_MS) return;
-    lastTopTouch = now;
+    // Game face
+    face->Expression.GoTo_Normal();
+    face->RandomBlink = false;
+    face->RandomLook = false;
     
-    // Track spam
-    if (now - topTouchWindow < SPAM_WINDOW_MS) {
-        recentTopTouches++;
-    } else {
-        recentTopTouches = 1;
-        topTouchWindow = now;
+    // Show "Let's play!"
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(20, 35, "Let's Play!");
+    u8g2.sendBuffer();
+    playExcitedSound();
+    delay(1500);
+    
+    // Generate first pattern
+    gamePattern[0] = random(2);  // 0 = top/left, 1 = back/right
+    
+    showGamePattern();
+}
+
+void showGamePattern() {
+    // Show score
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    char buf[16];
+    sprintf(buf, "Score: %d", gameScore);
+    u8g2.drawStr(35, 15, buf);
+    u8g2.drawStr(30, 35, "Watch me!");
+    u8g2.sendBuffer();
+    
+    delay(800);
+    
+    setAllLEDs(0, 0, 0);
+    delay(300);
+    
+    // Play pattern
+    for (int i = 0; i < gameLength; i++) {
+        if (gamePattern[i] == 0) {
+            // Top = Left LED = Green
+            setSingleLED(LED_LEFT, 0, 255, 0);
+            face->Look.LookAt(-0.5, 0);
+        } else {
+            // Back = Right LED = Blue
+            setSingleLED(LED_RIGHT, 0, 0, 255);
+            face->Look.LookAt(0.5, 0);
+        }
+        face->Update();
+        delay(gameSpeed);
+        
+        setAllLEDs(0, 0, 0);
+        face->Look.LookAt(0, 0);
+        face->Update();
+        delay(200);
     }
     
-    currentState = REACTING;
+    // Your turn
+    u8g2.clearBuffer();
+    u8g2.drawStr(30, 35, "Your turn!");
+    u8g2.sendBuffer();
     
-    // Check for spam
-    if (recentTopTouches >= SPAM_TOUCH_COUNT) {
-        setMoodAnnoyed();
-        playAnnoyedSound();
-        recentTopTouches = 0;
+    gameInput = 0;
+}
+
+void handleGameInput(int input) {
+    // Flash LED for feedback
+    if (input == 0) {
+        setSingleLED(LED_LEFT, 0, 255, 0);
     } else {
-        setMoodHappy();
-        playHappySound();
+        setSingleLED(LED_RIGHT, 0, 0, 255);
+    }
+    delay(150);
+    setAllLEDs(0, 0, 0);
+    
+    // Check if correct
+    if (input == gamePattern[gameInput]) {
+        gameInput++;
+        
+        // Completed pattern?
+        if (gameInput >= gameLength) {
+            // Success!
+            gameScore++;
+            playHappySound();
+            
+            face->Expression.GoTo_Happy();
+            face->Update();
+            flashLEDs(0, 255, 0, 300);
+            
+            // Next round
+            if (gameLength < 20) {
+                gameLength++;
+                gamePattern[gameLength - 1] = random(2);
+                
+                // Speed up every 3 rounds
+                if (gameScore % 3 == 0 && gameSpeed > 200) {
+                    gameSpeed -= 50;
+                }
+            }
+            
+            delay(500);
+            showGamePattern();
+        }
+    } else {
+        // Wrong! Game over
+        gameOver();
+    }
+}
+
+void gameOver() {
+    playAnnoyedSound();
+    face->Expression.GoTo_Sad();
+    face->Update();
+    
+    // Sad flash
+    for (int i = 0; i < 3; i++) {
+        setAllLEDs(255, 0, 0);
+        delay(100);
+        setAllLEDs(0, 0, 0);
+        delay(100);
     }
     
-    // Brief reaction time
-    delay(100);
+    // Show final score
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(20, 25, "Game Over!");
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    char buf[20];
+    sprintf(buf, "Score: %d", gameScore);
+    u8g2.drawStr(35, 45, buf);
+    u8g2.sendBuffer();
+    
+    delay(3000);
+    
+    // Return to normal
+    face->RandomBlink = true;
+    face->RandomLook = true;
+    setMoodHappy();
     currentState = IDLE;
 }
 
-void handleBackTouch() {
+// === TOUCH HANDLERS ===
+void processTopTouch(bool pressed) {
     unsigned long now = millis();
     
-    // Debounce
-    if (now - lastBackTouch < TOUCH_DEBOUNCE_MS) return;
-    lastBackTouch = now;
+    if (pressed && !topWasPressed) {
+        // Just pressed
+        topPressStart = now;
+        topWasPressed = true;
+    }
+    else if (!pressed && topWasPressed) {
+        // Just released
+        unsigned long holdTime = now - topPressStart;
+        topWasPressed = false;
+        
+        // Was it a hold?
+        if (holdTime >= LONG_PRESS_MS) {
+            // Long press - go to sleep
+            goToSleep();
+            return;
+        }
+        else if (holdTime >= PET_HOLD_MS) {
+            // Medium hold was petting, now stopped
+            if (currentState == PETTING) {
+                stopPetting();
+            }
+            return;
+        }
+        
+        // It was a tap - count it
+        if (now - topReleaseTime < TRIPLE_TAP_MS) {
+            topTapCount++;
+        } else {
+            topTapCount = 1;
+        }
+        topReleaseTime = now;
+        
+        // Check for triple tap
+        if (topTapCount >= 3) {
+            topTapCount = 0;
+            startGame();
+            return;
+        }
+        
+        // Regular tap - track for spam
+        if (now - topTouchWindow < SPAM_WINDOW_MS) {
+            recentTopTouches++;
+        } else {
+            recentTopTouches = 1;
+            topTouchWindow = now;
+        }
+        
+        // React based on spam
+        currentState = REACTING;
+        if (recentTopTouches >= SPAM_TOUCH_COUNT) {
+            setMoodAnnoyed();
+            playAnnoyedSound();
+            recentTopTouches = 0;
+        } else {
+            setMoodHappy();
+            playHappySound();
+        }
+        delay(50);
+        currentState = IDLE;
+    }
+    else if (pressed && topWasPressed) {
+        // Being held
+        unsigned long holdTime = now - topPressStart;
+        
+        if (holdTime >= PET_HOLD_MS && holdTime < LONG_PRESS_MS && currentState != PETTING) {
+            startPetting();
+        }
+        
+        if (currentState == PETTING) {
+            updatePetting();
+        }
+    }
+}
+
+void processBackTouch(bool pressed) {
+    unsigned long now = millis();
     
-    currentState = REACTING;
-    
-    // Always surprised
-    face->Expression.GoTo_Surprised();
-    flashLEDs(255, 255, 255, 100);  // White flash
-    playSurprisedSound();
-    
-    delay(500);
-    
-    // Return to current mood
-    if (currentMood == HAPPY) setMoodHappy();
-    else if (currentMood == ANNOYED) setMoodAnnoyed();
-    
-    currentState = IDLE;
+    if (pressed && !backWasPressed) {
+        backWasPressed = true;
+    }
+    else if (!pressed && backWasPressed) {
+        backWasPressed = false;
+        
+        // Count taps
+        if (now - backReleaseTime < DOUBLE_TAP_MS) {
+            backTapCount++;
+        } else {
+            backTapCount = 1;
+        }
+        backReleaseTime = now;
+        
+        // Check for double tap
+        if (backTapCount >= 2) {
+            backTapCount = 0;
+            doDance();
+            return;
+        }
+        
+        // Single tap - surprised
+        currentState = REACTING;
+        face->Expression.GoTo_Surprised();
+        flashLEDs(255, 255, 255, 100);
+        playSurprisedSound();
+        delay(400);
+        
+        if (currentMood == HAPPY) setMoodHappy();
+        else if (currentMood == ANNOYED) setMoodAnnoyed();
+        currentState = IDLE;
+    }
 }
 
 // === SENSOR READING ===
-bool readTopTouch() {
-    return digitalRead(TOUCH_TOP_PIN) == HIGH;
-}
-
-bool readBackTouch() {
-    return digitalRead(TOUCH_BACK_PIN) == HIGH;
-}
-
-int readLightLevel() {
-    return analogRead(LIGHT_SENSOR_PIN);
-}
+bool readTopTouch() { return digitalRead(TOUCH_TOP_PIN) == HIGH; }
+bool readBackTouch() { return digitalRead(TOUCH_BACK_PIN) == HIGH; }
+int readLightLevel() { return analogRead(LIGHT_SENSOR_PIN); }
 
 // === IDLE BEHAVIORS ===
 void doIdleBehaviors() {
     unsigned long now = millis();
     
-    // Random blink (handled by face library if RandomBlink is on)
-    
-    // Random chirp
     if (now - lastIdleChirp > IDLE_CHIRP_INTERVAL) {
         lastIdleChirp = now;
         if (random(100) < IDLE_CHIRP_CHANCE) {
@@ -341,8 +564,7 @@ void doIdleBehaviors() {
         }
     }
     
-    // Calm down from annoyed
-    if (currentMood == ANNOYED && now - lastTopTouch > 5000) {
+    if (currentMood == ANNOYED && now - topReleaseTime > 5000) {
         setMoodHappy();
     }
 }
@@ -352,28 +574,21 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Droid starting...");
     
-    // Initialize pins
     pinMode(TOUCH_TOP_PIN, INPUT);
     pinMode(TOUCH_BACK_PIN, INPUT);
     pinMode(LIGHT_SENSOR_PIN, INPUT);
     
-    // Initialize filesystem
     if (!LittleFS.begin(true)) {
-        Serial.println("LittleFS mount failed!");
-    } else {
-        Serial.println("LittleFS mounted");
+        Serial.println("LittleFS failed!");
     }
     
-    // Initialize LEDs
     leds.begin();
     leds.setBrightness(80);
     setLEDColor(0, 150, 150, true);
     
-    // Initialize audio
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-    audio.setVolume(15);  // 0-21
+    audio.setVolume(15);
     
-    // Initialize face
     face = new Face(128, 64, 40);
     face->Expression.GoTo_Normal();
     face->RandomBlink = true;
@@ -381,8 +596,7 @@ void setup() {
     face->Blink.Timer.SetIntervalMillis(3000);
     face->Look.Timer.SetIntervalMillis(2500);
     
-    // Startup sequence
-    Serial.println("Waking up...");
+    // Startup
     flashLEDs(0, 150, 150, 200);
     playWakeSound();
     face->Expression.GoTo_Happy();
@@ -396,35 +610,49 @@ void setup() {
 // === MAIN LOOP ===
 void loop() {
     unsigned long now = millis();
+    bool topPressed = readTopTouch();
+    bool backPressed = readBackTouch();
     
-    // Audio processing (must be called regularly)
     audio.loop();
+    
+    // Game mode has its own input handling
+    if (currentState == PLAYING_GAME) {
+        if (topPressed && !topWasPressed) {
+            topWasPressed = true;
+            handleGameInput(0);  // Top = 0
+        } else if (!topPressed) {
+            topWasPressed = false;
+        }
+        
+        if (backPressed && !backWasPressed) {
+            backWasPressed = true;
+            handleGameInput(1);  // Back = 1
+        } else if (!backPressed) {
+            backWasPressed = false;
+        }
+        return;
+    }
     
     // Light check
     if (now - lastLightCheck > LIGHT_CHECK_MS) {
         lastLightCheck = now;
         int light = readLightLevel();
         
-        if (light < DARK_LEVEL && currentState != SLEEPING) {
+        if (light < DARK_LEVEL && currentState != SLEEPING && currentState != PETTING) {
             goToSleep();
         } else if (light > BRIGHT_LEVEL && currentState == SLEEPING) {
             wakeUp();
         }
     }
     
-    // Touch check (only when not sleeping)
-    if (currentState != SLEEPING) {
-        if (readTopTouch()) {
-            handleTopTouch();
-        }
-        if (readBackTouch()) {
-            handleBackTouch();
-        }
-    } else {
-        // Wake on touch while sleeping
-        if (readTopTouch() || readBackTouch()) {
+    // Touch processing
+    if (currentState == SLEEPING) {
+        if (topPressed || backPressed) {
             wakeUp();
         }
+    } else {
+        processTopTouch(topPressed);
+        processBackTouch(backPressed);
     }
     
     // Idle behaviors
@@ -439,7 +667,6 @@ void loop() {
     updateLEDs();
 }
 
-// === AUDIO CALLBACKS (required by ESP32-audioI2S) ===
 void audio_info(const char *info) {
     Serial.print("Audio: ");
     Serial.println(info);
