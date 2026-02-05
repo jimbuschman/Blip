@@ -1,14 +1,26 @@
-New interactions:
-TriggerActionHold top (1-2s)Pet mode — extra happy, warm LEDsHold top (2s+)Goes to sleepDouble-tap backDance! Wiggle animation + colorsTriple-tap topStart Simon Says game
-Simon Says game:
+Game Menu (triple-tap top):
+┌────────────────────────┐
+│     Let's Play!        │
+│                        │
+│  > Simon Says          │  ← tap top to switch
+│    Pong                │  ← tap back to select
+│                        │
+└────────────────────────┘
+Pong controls:
 
-Left LED (green) = tap top
-Right LED (blue) = tap back
-Pattern starts with 1 step, grows each round
-Gets faster every 3 rounds
-Score shown on screen
-Wrong input = game over + final score
+Hold top = paddle up
+Hold back = paddle down
+First to 5 wins
 
-Full interaction summary:
-InputReactionTap topHappySpam top (4x)AnnoyedHold top (1s)Pet modeHold top (2s)SleepTriple-tap topSimon SaysTap backSurprisedDouble-tap backDanceDarkSleepy → sleepLight (sleeping)Wake upTouch (sleeping)Wake up
-You'll need to add an excited sound category to your voice generator for the dance and game start. Want me to update the voice generator with suggested excited phrases?
+Pong personality:
+
+LEDs pulse faster as ball speeds up
+You score → green flash, happy face, happy sound
+AI scores → red flash, angry face, angry sound
+You win → victory celebration
+AI wins → smug "Hehe! >:)" + celebration (he's a sore winner)
+
+Full interaction list now:
+TriggerActionTap topHappySpam top (4x)AnnoyedHold top (1s)Pet modeHold top (2s)SleepTriple-tap topGame menuTap backSurprisedDouble-tap backDanceDarkSleepLight/touch when sleepingWake
+In game menu:
+InputActionTap topSwitch selectionTap backStart selected game
