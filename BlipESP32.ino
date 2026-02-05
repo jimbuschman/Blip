@@ -114,26 +114,58 @@ int menuSelection = 0;
 int lastSoundIndex[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 
 // === SOUND CATEGORIES ===
-const char* happySounds[] = {"/happy/happy_01.wav", "/happy/happy_02.wav", "/happy/happy_03.wav", "/happy/happy_04.wav"};
-const int numHappySounds = 4;
+const char* happySounds[] = {
+    "/happy/happy_01.wav", "/happy/happy_02.wav", "/happy/happy_03.wav",
+    "/happy/happy_04.wav", "/happy/happy_05.wav", "/happy/happy_06.wav",
+    "/happy/happy_07.wav", "/happy/happy_08.wav", "/happy/happy_09.wav",
+    "/happy/happy_10.wav"
+};
+const int numHappySounds = 10;
 
-const char* annoyedSounds[] = {"/annoyed/annoyed_01.wav", "/annoyed/annoyed_02.wav", "/annoyed/annoyed_03.wav"};
-const int numAnnoyedSounds = 3;
+const char* annoyedSounds[] = {
+    "/annoyed/annoyed_01.wav", "/annoyed/annoyed_02.wav", "/annoyed/annoyed_03.wav",
+    "/annoyed/annoyed_04.wav", "/annoyed/annoyed_05.wav", "/annoyed/annoyed_06.wav",
+    "/annoyed/annoyed_07.wav", "/annoyed/annoyed_08.wav", "/annoyed/annoyed_09.wav",
+    "/annoyed/annoyed_10.wav"
+};
+const int numAnnoyedSounds = 10;
 
-const char* surprisedSounds[] = {"/surprised/surprised_01.wav", "/surprised/surprised_02.wav", "/surprised/surprised_03.wav"};
-const int numSurprisedSounds = 3;
+const char* surprisedSounds[] = {
+    "/surprised/surprised_01.wav", "/surprised/surprised_02.wav",
+    "/surprised/surprised_03.wav", "/surprised/surprised_04.wav",
+    "/surprised/surprised_05.wav", "/surprised/surprised_06.wav",
+    "/surprised/surprised_07.wav", "/surprised/surprised_08.wav"
+};
+const int numSurprisedSounds = 8;
 
-const char* sleepySounds[] = {"/sleepy/sleepy_01.wav", "/sleepy/sleepy_02.wav"};
-const int numSleepySounds = 2;
+const char* sleepySounds[] = {
+    "/sleepy/sleepy_01.wav", "/sleepy/sleepy_02.wav", "/sleepy/sleepy_03.wav",
+    "/sleepy/sleepy_04.wav", "/sleepy/sleepy_05.wav", "/sleepy/sleepy_06.wav"
+};
+const int numSleepySounds = 6;
 
-const char* wakeSounds[] = {"/wake/wake_01.wav", "/wake/wake_02.wav", "/wake/wake_03.wav"};
-const int numWakeSounds = 3;
+const char* wakeSounds[] = {
+    "/wake/wake_01.wav", "/wake/wake_02.wav", "/wake/wake_03.wav",
+    "/wake/wake_04.wav", "/wake/wake_05.wav", "/wake/wake_06.wav",
+    "/wake/wake_07.wav", "/wake/wake_08.wav"
+};
+const int numWakeSounds = 8;
 
-const char* idleSounds[] = {"/idle/idle_01.wav", "/idle/idle_02.wav", "/idle/idle_03.wav", "/idle/idle_04.wav"};
-const int numIdleSounds = 4;
+const char* idleSounds[] = {
+    "/idle/idle_01.wav", "/idle/idle_02.wav", "/idle/idle_03.wav",
+    "/idle/idle_04.wav", "/idle/idle_05.wav", "/idle/idle_06.wav",
+    "/idle/idle_07.wav", "/idle/idle_08.wav", "/idle/idle_09.wav",
+    "/idle/idle_10.wav"
+};
+const int numIdleSounds = 10;
 
-const char* excitedSounds[] = {"/excited/excited_01.wav", "/excited/excited_02.wav", "/excited/excited_03.wav"};
-const int numExcitedSounds = 3;
+const char* excitedSounds[] = {
+    "/excited/excited_01.wav", "/excited/excited_02.wav", "/excited/excited_03.wav",
+    "/excited/excited_04.wav", "/excited/excited_05.wav", "/excited/excited_06.wav",
+    "/excited/excited_07.wav", "/excited/excited_08.wav", "/excited/excited_09.wav",
+    "/excited/excited_10.wav"
+};
+const int numExcitedSounds = 10;
 
 // === SOUND FUNCTIONS ===
 int pickRandomSound(int category, int numSounds) {
@@ -188,7 +220,7 @@ void setSingleLED(int index, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void updateLEDs() {
-    if (currentState == PLAYING_GAME) return;  // Game controls LEDs directly
+    if (currentState == PLAYING_SIMON || currentState == PLAYING_PONG) return;  // Game controls LEDs directly
     
     uint8_t r = ledR, g = ledG, b = ledB;
     
@@ -305,7 +337,7 @@ void doDance() {
 
 // === SIMON SAYS GAME ===
 void startGame() {
-    currentState = PLAYING_GAME;
+    currentState = PLAYING_SIMON;
     gameLength = 1;
     gameScore = 0;
     gameSpeed = 500;
