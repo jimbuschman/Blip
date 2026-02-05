@@ -1,0 +1,22 @@
+python voice_generator.py
+```
+
+**Output structure:**
+```
+droid_sounds/
+├── happy/
+│   ├── happy_01.wav
+│   ├── happy_02.wav
+│   └── ... (10 files)
+├── annoyed/
+│   └── ... (10 files)
+├── surprised/
+│   └── ... (8 files)
+├── sleepy/
+│   └── ... (6 files)
+├── wake/
+│   └── ... (8 files)
+├── idle/
+│   └── ... (10 files)
+└── excited/
+    └── ... (10 files)
