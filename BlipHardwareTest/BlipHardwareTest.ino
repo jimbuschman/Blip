@@ -6,7 +6,7 @@
  *   2. LEDs (cycle R, G, B)
  *   3. Touch sensors (live readout)
  *   4. Light sensor (live readout)
- *   5. Speaker (simple tone)
+ *   5. Speaker (DAC tone on GPIO 25)
  *
  * Tap TOP touch sensor to advance to next test.
  * Watch Serial Monitor (115200) for extra info.
@@ -15,7 +15,6 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <Adafruit_NeoPixel.h>
-#include <driver/i2s.h>
 
 // === PINS (must match your wiring) ===
 #define LED_PIN         16
@@ -23,9 +22,7 @@
 #define TOUCH_TOP_PIN   4
 #define TOUCH_BACK_PIN  17
 #define LIGHT_SENSOR_PIN 34
-#define I2S_DOUT        25
-#define I2S_BCLK        26
-#define I2S_LRC         27
+#define SPEAKER_PIN     25
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
 Adafruit_NeoPixel leds(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -189,68 +186,28 @@ void testLight() {
     for (int i = 0; i < NUM_LEDS; i++)
         leds.setPixelColor(i, leds.Color(brightness, brightness, brightness));
     leds.show();
-
-    Serial.print("Light: ");
-    Serial.println(light);
 }
 
-// === TEST 5: SPEAKER ===
+// === TEST 5: SPEAKER (DAC tone) ===
 void testSpeaker() {
     static bool tonePlayed = false;
 
     if (!tonePlayed) {
         tonePlayed = true;
-        Serial.println("Playing test tone...");
+        Serial.println("Playing test tone via DAC...");
 
-        // Init I2S
-        i2s_config_t i2s_config = {
-            .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-            .sample_rate = 16000,
-            .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-            .intr_alloc_flags = 0,
-            .dma_buf_count = 8,
-            .dma_buf_len = 64,
-            .use_apll = false
-        };
-
-        i2s_pin_config_t pin_config = {
-            .bck_io_num = I2S_BCLK,
-            .ws_io_num = I2S_LRC,
-            .data_out_num = I2S_DOUT,
-            .data_in_num = I2S_PIN_NO_CHANGE
-        };
-
-        i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-        i2s_set_pin(I2S_NUM_0, &pin_config);
-
-        // Generate a simple beep (440Hz for 1 second)
-        const int duration_ms = 1000;
-        const int freq = 440;
-        const int sample_rate = 16000;
-        const int total_samples = sample_rate * duration_ms / 1000;
-
-        int16_t samples[128];
-        size_t bytes_written;
-        int samplesWritten = 0;
-
-        while (samplesWritten < total_samples) {
-            int chunk = min(64, total_samples - samplesWritten);
-            for (int i = 0; i < chunk; i++) {
-                int16_t val = (int16_t)(sin(2.0 * 3.14159 * freq * (samplesWritten + i) / sample_rate) * 16000);
-                samples[i * 2] = val;      // Left
-                samples[i * 2 + 1] = val;  // Right
-            }
-            i2s_write(I2S_NUM_0, samples, chunk * 4, &bytes_written, portMAX_DELAY);
-            samplesWritten += chunk;
+        // Generate 440Hz tone for 1 second using dacWrite on GPIO 25
+        // This goes through the MAX98357 amp to the speaker
+        unsigned long start = millis();
+        while (millis() - start < 1000) {
+            float t = (millis() - start) / 1000.0;
+            // Sine wave: 440Hz, output range 0-255 for DAC
+            uint8_t val = (uint8_t)(128 + 127 * sin(2.0 * 3.14159 * 440.0 * t));
+            dacWrite(SPEAKER_PIN, val);
+            delayMicroseconds(50);  // ~20kHz sample rate
         }
+        dacWrite(SPEAKER_PIN, 128);  // Return to midpoint (silence)
 
-        // Silence after tone
-        memset(samples, 0, sizeof(samples));
-        i2s_write(I2S_NUM_0, samples, sizeof(samples), &bytes_written, portMAX_DELAY);
-
-        i2s_driver_uninstall(I2S_NUM_0);
         Serial.println("Tone done.");
     }
 
