@@ -9,7 +9,7 @@
 #include <U8g2lib.h>
 #include <Adafruit_NeoPixel.h>
 
-#define LED_PIN         16
+#define LED_PIN         2
 #define NUM_LEDS        3
 #define TOUCH_TOP_PIN   4
 #define TOUCH_BACK_PIN  17
