@@ -12,12 +12,12 @@ USB ──► ESP32 5V pin ──► 5V rail
 |------|-----------|-------|
 | 21 | OLED SDA | I2C data |
 | 22 | OLED SCL | I2C clock |
-| 13 | LED Data | WS2812B |
+| 16 | LED Data | WS2812B |
 | 25 | I2S DIN | Audio data |
 | 26 | I2S BCLK | Audio clock |
 | 27 | I2S LRC | Audio L/R |
 | 4 | Touch Top | TTP223 |
-| 15 | Touch Back | TTP223 |
+| 17 | Touch Back | TTP223 |
 | 34 | Light Sensor | ADC input |
 
 ---
@@ -40,7 +40,7 @@ LED Strip      ESP32
 ─────────      ─────
 VCC      ────► 5V
 GND      ────► GND
-DIN      ────► GPIO 13
+DIN      ────► GPIO 16
 
 Wire LEDs in series: ESP32 → LED1 → LED2 → LED3
 ```
@@ -72,7 +72,7 @@ TTP223 (Back)  ESP32
 ─────────────  ─────
 VCC      ────► 3.3V
 GND      ────► GND
-OUT      ────► GPIO 15
+OUT      ────► GPIO 17
 ```
 
 ### Light Sensor (Voltage Divider)
@@ -106,14 +106,14 @@ OUT      ────► GPIO 15
                             │ G21 ──┼─────────┼──► OLED SDA
                             │ G22 ──┼─────────┼──► OLED SCL
                             │       │         │
-                            │ G13 ──┼─────────┼──► LED Data In
+                            │ G16 ──┼─────────┼──► LED Data In
                             │       │         │
                             │ G25 ──┼─────────┼──► Amp DIN
                             │ G26 ──┼─────────┼──► Amp BCLK
                             │ G27 ──┼─────────┼──► Amp LRC
                             │       │         │
                             │  G4 ──┼─────────┼──► Touch Top OUT
-                            │ G15 ──┼─────────┼──► Touch Back OUT
+                            │ G17 ──┼─────────┼──► Touch Back OUT
                             │       │         │
                             │ G34 ──┼─────────┼──► LDR junction
                             │       │         │
@@ -126,7 +126,7 @@ OUT      ────► GPIO 15
 
 1. **Common Ground**: All GNDs must connect together
 
-2. **LED Level Shifting**: WS2812B wants 5V logic but usually works with 3.3V GPIO. If LEDs are glitchy, add a level shifter on GPIO 13
+2. **LED Level Shifting**: WS2812B wants 5V logic but usually works with 3.3V GPIO. If LEDs are glitchy, add a level shifter on GPIO 16
 
 3. **LDR Resistor Value**: 10K is a starting point. Adjust based on your LDR:
    - More sensitive to darkness: use larger resistor (47K)

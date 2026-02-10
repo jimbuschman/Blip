@@ -3,9 +3,9 @@
  * 
  * Hardware:
  *   - SSD1306 128x64 OLED (I2C: GPIO 21/22)
- *   - WS2812B LEDs x3 (GPIO 13)
+ *   - WS2812B LEDs x3 (GPIO 16)
  *   - MAX98357 I2S Amp (GPIO 25/26/27)
- *   - TTP223 Touch x2 (GPIO 4 top, GPIO 15 back)
+ *   - TTP223 Touch x2 (GPIO 4 top, GPIO 17 back)
  *   - Light sensor/LDR (GPIO 34)
  * 
  * Interactions:
@@ -28,7 +28,7 @@
 #include "Audio.h"
 
 // === PIN DEFINITIONS ===
-#define LED_PIN         13
+#define LED_PIN         16
 #define NUM_LEDS        3
 #define LED_LEFT        0
 #define LED_MID         1
@@ -39,7 +39,7 @@
 #define I2S_LRC         27
 
 #define TOUCH_TOP_PIN   4
-#define TOUCH_BACK_PIN  15
+#define TOUCH_BACK_PIN  17
 #define LIGHT_SENSOR_PIN 34
 
 // === THRESHOLDS & TIMING ===
