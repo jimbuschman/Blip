@@ -34,11 +34,11 @@ SDA    ──────► GPIO 21
 SCL    ──────► GPIO 22
 ```
 
-### WS2812B LEDs x3 (5V)
+### WS2812B LEDs x3 (3.3V)
 ```
 LED Strip      ESP32
 ─────────      ─────
-VCC      ────► 5V
+VCC      ────► 3.3V
 GND      ────► GND
 DIN      ────► GPIO 16
 
@@ -97,9 +97,9 @@ OUT      ────► GPIO 17
                             ┌─────────────────┐
                             │   ESP32 D1 Mini │
                             │                 │
-    ┌───────────┐           │  5V ──┬─────────┼──► LEDs VCC, Amp VIN
+    ┌───────────┐           │  5V ──┬─────────┼──► Amp VIN
     │  USB      │──► 5V ───►│       │         │
-    │  Power    │           │ 3V3 ──┼─────────┼──► OLED VCC, Touch VCC, LDR, Amp SD
+    │  Power    │           │ 3V3 ──┼─────────┼──► OLED VCC, Touch VCC, LDR, LEDs VCC, Amp SD
     └───────────┘           │       │         │
                             │ GND ──┼─────────┼──► All GNDs (common)
                             │       │         │
@@ -126,7 +126,7 @@ OUT      ────► GPIO 17
 
 1. **Common Ground**: All GNDs must connect together
 
-2. **LED Level Shifting**: WS2812B wants 5V logic but usually works with 3.3V GPIO. If LEDs are glitchy, add a level shifter on GPIO 16
+2. **LED Power**: LEDs run on 3.3V to avoid logic level issues (ESP32 GPIO is 3.3V). They will be dimmer than at 5V but work reliably
 
 3. **LDR Resistor Value**: 10K is a starting point. Adjust based on your LDR:
    - More sensitive to darkness: use larger resistor (47K)
@@ -152,8 +152,8 @@ OUT      ────► GPIO 17
 Key things to watch out for:
 Power:
 
-5V rail: LEDs + Amp power (from USB via ESP32)
-3.3V rail: OLED + Touch sensors + LDR (from ESP32 regulator)
+5V rail: Amp power (from USB via ESP32)
+3.3V rail: OLED + Touch sensors + LDR + LEDs (from ESP32 regulator)
 All GNDs connected together — this is critical
 
 Common gotchas:
