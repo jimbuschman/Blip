@@ -33,19 +33,40 @@ unsigned long lastDebounce = 0;
 
 void setup() {
     Serial.begin(115200);
+    delay(2000);
     Serial.println("=== Blip Hardware Test ===");
 
-    pinMode(TOUCH_TOP_PIN, INPUT);
-    pinMode(TOUCH_BACK_PIN, INPUT);
-    pinMode(LIGHT_SENSOR_PIN, INPUT);
-
-    u8g2.begin();
+    Serial.println("Step 1: LEDs...");
     leds.begin();
     leds.setBrightness(80);
+    for (int i = 0; i < NUM_LEDS; i++)
+        leds.setPixelColor(i, leds.Color(255, 0, 0));
+    leds.show();
+    Serial.println("  LEDs should be RED now");
+    delay(2000);
     leds.clear();
     leds.show();
 
+    Serial.println("Step 2: I2C scan...");
+    Wire.begin(21, 22);
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.print("  Found device at 0x");
+            Serial.println(addr, HEX);
+        }
+    }
+    Serial.println("  I2C scan done");
+
+    Serial.println("Step 3: OLED init...");
+    pinMode(TOUCH_TOP_PIN, INPUT);
+    pinMode(TOUCH_BACK_PIN, INPUT);
+    pinMode(LIGHT_SENSOR_PIN, INPUT);
+    u8g2.begin();
+    Serial.println("  OLED initialized");
+
     showWelcome();
+    Serial.println("Setup complete. Tap TOP to advance.");
 }
 
 void loop() {
