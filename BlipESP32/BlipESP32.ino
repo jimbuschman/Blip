@@ -189,25 +189,71 @@ void playSound(const char* path) {
     File file = LittleFS.open(path, "r");
     if (!file) { Serial.println("Failed to open file"); return; }
 
-    Serial.printf("File size: %d bytes\n", file.size());
+    // Parse WAV header properly
+    char chunkId[5] = {0};
+    file.read((uint8_t*)chunkId, 4); // "RIFF"
+    file.seek(8);
+    file.read((uint8_t*)chunkId, 4); // "WAVE"
 
-    // Skip WAV header (44 bytes)
-    file.seek(44);
+    // Find "fmt " chunk
+    uint16_t audioFormat = 1, numChannels = 1, bitsPerSample = 8;
+    uint32_t sampleRate = 16000, dataSize = 0;
 
-    // Read and play in chunks - files are 8-bit unsigned mono 16kHz
-    uint8_t rawBuf[256];
-    int16_t i2sBuf[512]; // stereo pairs
-    size_t bytes_written;
-
+    file.seek(12);
     while (file.available()) {
-        int bytesRead = file.read(rawBuf, 256);
-        // Convert 8-bit unsigned mono to 16-bit signed stereo
-        for (int i = 0; i < bytesRead; i++) {
-            int16_t sample = ((int16_t)rawBuf[i] - 128) << 8;
-            i2sBuf[i * 2] = sample;
-            i2sBuf[i * 2 + 1] = sample;
+        char id[5] = {0};
+        uint32_t chunkSize;
+        file.read((uint8_t*)id, 4);
+        file.read((uint8_t*)&chunkSize, 4);
+
+        if (strcmp(id, "fmt ") == 0) {
+            file.read((uint8_t*)&audioFormat, 2);
+            file.read((uint8_t*)&numChannels, 2);
+            file.read((uint8_t*)&sampleRate, 4);
+            file.seek(file.position() + 6); // skip byteRate + blockAlign
+            file.read((uint8_t*)&bitsPerSample, 2);
+            // Skip any extra fmt bytes
+            if (chunkSize > 16) file.seek(file.position() + (chunkSize - 16));
+        } else if (strcmp(id, "data") == 0) {
+            dataSize = chunkSize;
+            break; // data starts here
+        } else {
+            file.seek(file.position() + chunkSize); // skip unknown chunk
         }
-        i2s_write(I2S_NUM_0, i2sBuf, bytesRead * 4, &bytes_written, portMAX_DELAY);
+    }
+
+    Serial.printf("WAV: %dHz, %dch, %dbit, %d bytes data\n",
+                  sampleRate, numChannels, bitsPerSample, dataSize);
+
+    // Play audio data
+    uint8_t rawBuf[256];
+    int16_t i2sBuf[512];
+    size_t bytes_written;
+    uint32_t bytesRemaining = dataSize;
+
+    while (bytesRemaining > 0 && file.available()) {
+        int toRead = bytesRemaining < 256 ? bytesRemaining : 256;
+        int bytesRead = file.read(rawBuf, toRead);
+        bytesRemaining -= bytesRead;
+
+        if (bitsPerSample == 8) {
+            // 8-bit unsigned mono to 16-bit signed stereo
+            for (int i = 0; i < bytesRead; i++) {
+                int16_t sample = ((int16_t)rawBuf[i] - 128) << 8;
+                i2sBuf[i * 2] = sample;
+                i2sBuf[i * 2 + 1] = sample;
+            }
+            i2s_write(I2S_NUM_0, i2sBuf, bytesRead * 4, &bytes_written, portMAX_DELAY);
+        } else if (bitsPerSample == 16) {
+            // 16-bit signed - already in right format, just duplicate for stereo
+            int16_t* samples16 = (int16_t*)rawBuf;
+            int numSamples = bytesRead / 2;
+            for (int i = 0; i < numSamples; i++) {
+                i2sBuf[i * 2] = samples16[i];
+                i2sBuf[i * 2 + 1] = samples16[i];
+            }
+            i2s_write(I2S_NUM_0, i2sBuf, numSamples * 4, &bytes_written, portMAX_DELAY);
+        }
     }
     file.close();
 
