@@ -25,8 +25,8 @@
 #include <FS.h>
 #include <LittleFS.h>
 #include <driver/adc.h>
+#include <driver/i2s.h>
 #include "Face.h"
-#include "Audio.h"
 
 // === PIN DEFINITIONS ===
 #define LED_PIN         16
@@ -64,7 +64,7 @@ enum State { IDLE, REACTING, SLEEPING, WAKING, PETTING, DANCING, GAME_MENU, PLAY
 // === GLOBALS ===
 Face *face;
 Adafruit_NeoPixel leds(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
-Audio audio;
+bool audioPlaying = false;
 
 Mood currentMood = HAPPY;
 State currentState = IDLE;
@@ -179,12 +179,37 @@ int pickRandomSound(int category, int numSounds) {
 }
 
 void playSound(const char* path) {
-    if (LittleFS.exists(path)) {
-        audio.connecttoFS(LittleFS, path);
-    } else {
+    if (!LittleFS.exists(path)) {
         Serial.print("Sound not found: ");
         Serial.println(path);
+        return;
     }
+    File file = LittleFS.open(path, "r");
+    if (!file) return;
+
+    // Skip WAV header (44 bytes)
+    file.seek(44);
+
+    // Read and play in chunks - files are 8-bit unsigned mono 16kHz
+    uint8_t rawBuf[256];
+    int16_t i2sBuf[512]; // stereo pairs
+    size_t bytes_written;
+
+    while (file.available()) {
+        int bytesRead = file.read(rawBuf, 256);
+        // Convert 8-bit unsigned mono to 16-bit signed stereo
+        for (int i = 0; i < bytesRead; i++) {
+            int16_t sample = ((int16_t)rawBuf[i] - 128) << 8;
+            i2sBuf[i * 2] = sample;
+            i2sBuf[i * 2 + 1] = sample;
+        }
+        i2s_write(I2S_NUM_0, i2sBuf, bytesRead * 4, &bytes_written, portMAX_DELAY);
+    }
+    file.close();
+
+    // Flush with silence
+    memset(i2sBuf, 0, sizeof(i2sBuf));
+    i2s_write(I2S_NUM_0, i2sBuf, 512, &bytes_written, portMAX_DELAY);
 }
 
 void playHappySound() { playSound(happySounds[pickRandomSound(0, numHappySounds)]); }
@@ -917,8 +942,26 @@ void setup() {
     leds.setBrightness(80);
     setLEDColor(0, 150, 150, true);
     
-    audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-    audio.setVolume(15);
+    // I2S setup for audio playback
+    i2s_config_t i2s_config = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+        .sample_rate = 16000,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = 0,
+        .dma_buf_count = 8,
+        .dma_buf_len = 64,
+        .use_apll = false
+    };
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = I2S_BCLK,
+        .ws_io_num = I2S_LRC,
+        .data_out_num = I2S_DOUT,
+        .data_in_num = I2S_PIN_NO_CHANGE
+    };
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM_0, &pin_config);
     
     face = new Face(128, 64, 40);
     face->Expression.GoTo_Normal();
@@ -943,8 +986,6 @@ void loop() {
     unsigned long now = millis();
     bool topPressed = readTopTouch();
     bool backPressed = readBackTouch();
-    
-    audio.loop();
     
     // Game menu input
     if (currentState == GAME_MENU) {
@@ -1022,7 +1063,3 @@ void loop() {
     updateLEDs();
 }
 
-void audio_info(const char *info) {
-    Serial.print("Audio: ");
-    Serial.println(info);
-}
