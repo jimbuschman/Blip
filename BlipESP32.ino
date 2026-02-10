@@ -917,6 +917,7 @@ void setup() {
     leds.setBrightness(80);
     setLEDColor(0, 150, 150, true);
     
+    audio.setBufsize(-1, 16384);
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
     audio.setVolume(15);
     
