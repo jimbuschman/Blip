@@ -1,22 +1,15 @@
 /***************************************************
- * Blip Hardware Test
+ * Blip Hardware Test (Serial Only - No OLED)
  *
- * Tests each component one at a time:
- *   1. OLED display
- *   2. LEDs (cycle R, G, B)
- *   3. Touch sensors (live readout)
- *   4. Light sensor (live readout)
- *   5. Speaker (DAC tone on GPIO 25)
+ * Tests via Serial Monitor + LEDs only.
+ * OLED is skipped to isolate I2C wiring issue.
  *
  * Tap TOP touch sensor to advance to next test.
- * Watch Serial Monitor (115200) for extra info.
+ * Watch Serial Monitor at 115200 baud.
  ****************************************************/
 
-#include <Wire.h>
-#include <U8g2lib.h>
 #include <Adafruit_NeoPixel.h>
 
-// === PINS (must match your wiring) ===
 #define LED_PIN         16
 #define NUM_LEDS        3
 #define TOUCH_TOP_PIN   4
@@ -24,7 +17,6 @@
 #define LIGHT_SENSOR_PIN 34
 #define SPEAKER_PIN     25
 
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
 Adafruit_NeoPixel leds(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 int testStage = 0;
@@ -34,225 +26,154 @@ unsigned long lastDebounce = 0;
 void setup() {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("=== Blip Hardware Test ===");
+    Serial.println("=== Blip Hardware Test (No OLED) ===");
+    Serial.println("All output via Serial Monitor.");
+    Serial.println("Tap TOP sensor to advance tests.\n");
 
-    Serial.println("Step 1: LEDs...");
-    leds.begin();
-    leds.setBrightness(80);
-    for (int i = 0; i < NUM_LEDS; i++)
-        leds.setPixelColor(i, leds.Color(255, 0, 0));
-    leds.show();
-    Serial.println("  LEDs should be RED now");
-    delay(2000);
-    leds.clear();
-    leds.show();
-
-    Serial.println("Step 2: I2C scan...");
-    Wire.begin(21, 22);
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.print("  Found device at 0x");
-            Serial.println(addr, HEX);
-        }
-    }
-    Serial.println("  I2C scan done");
-
-    Serial.println("Step 3: OLED init...");
     pinMode(TOUCH_TOP_PIN, INPUT);
     pinMode(TOUCH_BACK_PIN, INPUT);
     pinMode(LIGHT_SENSOR_PIN, INPUT);
-    u8g2.begin();
-    Serial.println("  OLED initialized");
 
-    showWelcome();
-    Serial.println("Setup complete. Tap TOP to advance.");
+    leds.begin();
+    leds.setBrightness(80);
+    leds.clear();
+    leds.show();
+
+    Serial.println(">> TEST 1: LEDs");
+    Serial.println("   LEDs turning RED...");
+    setAllLEDs(255, 0, 0);
+    delay(1000);
+    Serial.println("   GREEN...");
+    setAllLEDs(0, 255, 0);
+    delay(1000);
+    Serial.println("   BLUE...");
+    setAllLEDs(0, 0, 255);
+    delay(1000);
+    Serial.println("   WHITE...");
+    setAllLEDs(255, 255, 255);
+    delay(1000);
+    leds.clear();
+    leds.show();
+    Serial.println("   Did you see R, G, B, White?");
+    Serial.println("   Tap TOP for next test.\n");
+}
+
+void setAllLEDs(uint8_t r, uint8_t g, uint8_t b) {
+    for (int i = 0; i < NUM_LEDS; i++)
+        leds.setPixelColor(i, leds.Color(r, g, b));
+    leds.show();
 }
 
 void loop() {
     bool topPressed = digitalRead(TOUCH_TOP_PIN) == HIGH;
 
-    // Debounced tap to advance tests
     if (topPressed && !lastTopState && millis() - lastDebounce > 300) {
         lastDebounce = millis();
         testStage++;
-        Serial.print("Advancing to test stage: ");
-        Serial.println(testStage);
-
-        // Clean up between tests
         leds.clear();
         leds.show();
     }
     lastTopState = topPressed;
 
     switch (testStage) {
-        case 0: /* welcome screen, waiting for tap */ break;
-        case 1: testOLED(); break;
-        case 2: testLEDs(); break;
-        case 3: testTouch(); break;
-        case 4: testLight(); break;
-        case 5: testSpeaker(); break;
+        case 0: /* waiting */ break;
+        case 1: testTouch(); break;
+        case 2: testLight(); break;
+        case 3: testSpeaker(); break;
         default: showDone(); break;
     }
 }
 
-// === WELCOME ===
-void showWelcome() {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(10, 25, "Blip H/W Test");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(10, 50, "Tap TOP to start");
-    u8g2.sendBuffer();
-    Serial.println("Display showing welcome. If you can read it, OLED works!");
-}
-
-// === TEST 1: OLED ===
-void testOLED() {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(5, 15, "1. OLED Test");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(5, 35, "Can you read this?");
-    u8g2.drawStr(5, 50, "If yes, OLED works!");
-    u8g2.drawStr(5, 63, "Tap TOP for next...");
-    u8g2.sendBuffer();
-}
-
-// === TEST 2: LEDs ===
-void testLEDs() {
-    static unsigned long lastChange = 0;
-    static int color = 0;
-
-    if (millis() - lastChange > 700) {
-        lastChange = millis();
-
-        switch (color % 4) {
-            case 0:
-                for (int i = 0; i < NUM_LEDS; i++)
-                    leds.setPixelColor(i, leds.Color(255, 0, 0));
-                break;
-            case 1:
-                for (int i = 0; i < NUM_LEDS; i++)
-                    leds.setPixelColor(i, leds.Color(0, 255, 0));
-                break;
-            case 2:
-                for (int i = 0; i < NUM_LEDS; i++)
-                    leds.setPixelColor(i, leds.Color(0, 0, 255));
-                break;
-            case 3:
-                for (int i = 0; i < NUM_LEDS; i++)
-                    leds.setPixelColor(i, leds.Color(255, 255, 255));
-                break;
-        }
-        leds.show();
-        color++;
+// === TEST 2: TOUCH SENSORS ===
+void testTouch() {
+    static bool headerShown = false;
+    if (!headerShown) {
+        headerShown = true;
+        Serial.println(">> TEST 2: TOUCH SENSORS");
+        Serial.println("   Touch each sensor. LED feedback:");
+        Serial.println("   Top = green LED, Back = blue LED");
+        Serial.println("   Hold BACK then tap TOP for next.\n");
     }
 
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(5, 15, "2. LED Test");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(5, 35, "LEDs cycling:");
-    u8g2.drawStr(5, 48, "R -> G -> B -> White");
-    u8g2.drawStr(5, 63, "Tap TOP for next...");
-    u8g2.sendBuffer();
-}
-
-// === TEST 3: TOUCH ===
-void testTouch() {
     bool top = digitalRead(TOUCH_TOP_PIN) == HIGH;
     bool back = digitalRead(TOUCH_BACK_PIN) == HIGH;
 
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(5, 15, "3. Touch Test");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-
-    char buf[32];
-    sprintf(buf, "Top:  %s", top ? "PRESSED" : "---");
-    u8g2.drawStr(5, 35, buf);
-    sprintf(buf, "Back: %s", back ? "PRESSED" : "---");
-    u8g2.drawStr(5, 48, buf);
-
-    u8g2.drawStr(5, 63, "Hold BACK, then tap TOP");
-    u8g2.sendBuffer();
-
-    // Light up LEDs as feedback
     if (top) leds.setPixelColor(0, leds.Color(0, 255, 0));
     else leds.setPixelColor(0, leds.Color(0, 0, 0));
+
     if (back) leds.setPixelColor(2, leds.Color(0, 0, 255));
     else leds.setPixelColor(2, leds.Color(0, 0, 0));
+
     leds.show();
+
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 500) {
+        lastPrint = millis();
+        Serial.print("   Top: ");
+        Serial.print(top ? "PRESSED" : "---");
+        Serial.print("  Back: ");
+        Serial.println(back ? "PRESSED" : "---");
+    }
 }
 
-// === TEST 4: LIGHT SENSOR ===
+// === TEST 3: LIGHT SENSOR ===
 void testLight() {
+    static bool headerShown = false;
+    if (!headerShown) {
+        headerShown = true;
+        Serial.println("\n>> TEST 3: LIGHT SENSOR");
+        Serial.println("   Cover/uncover the LDR.");
+        Serial.println("   LEDs brightness follows light level.");
+        Serial.println("   Tap TOP for next.\n");
+    }
+
     int light = analogRead(LIGHT_SENSOR_PIN);
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(5, 15, "4. Light Sensor");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-
-    char buf[32];
-    sprintf(buf, "Reading: %d", light);
-    u8g2.drawStr(5, 35, buf);
-    u8g2.drawStr(5, 48, "Cover/uncover sensor");
-    u8g2.drawStr(5, 63, "Tap TOP for next...");
-    u8g2.sendBuffer();
-
-    // Map light to LED brightness
     int brightness = map(light, 0, 4095, 0, 255);
-    for (int i = 0; i < NUM_LEDS; i++)
-        leds.setPixelColor(i, leds.Color(brightness, brightness, brightness));
-    leds.show();
+    setAllLEDs(brightness, brightness, brightness);
+
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 500) {
+        lastPrint = millis();
+        Serial.print("   Light reading: ");
+        Serial.println(light);
+    }
 }
 
-// === TEST 5: SPEAKER (DAC tone) ===
+// === TEST 4: SPEAKER ===
 void testSpeaker() {
     static bool tonePlayed = false;
-
     if (!tonePlayed) {
         tonePlayed = true;
-        Serial.println("Playing test tone via DAC...");
+        Serial.println("\n>> TEST 4: SPEAKER");
+        Serial.println("   Playing 440Hz tone for 1 second...");
 
-        // Generate 440Hz tone for 1 second using dacWrite on GPIO 25
-        // This goes through the MAX98357 amp to the speaker
         unsigned long start = millis();
         while (millis() - start < 1000) {
             float t = (millis() - start) / 1000.0;
-            // Sine wave: 440Hz, output range 0-255 for DAC
             uint8_t val = (uint8_t)(128 + 127 * sin(2.0 * 3.14159 * 440.0 * t));
             dacWrite(SPEAKER_PIN, val);
-            delayMicroseconds(50);  // ~20kHz sample rate
+            delayMicroseconds(50);
         }
-        dacWrite(SPEAKER_PIN, 128);  // Return to midpoint (silence)
+        dacWrite(SPEAKER_PIN, 128);
 
-        Serial.println("Tone done.");
+        Serial.println("   Did you hear a beep?");
+        Serial.println("   Tap TOP to finish.\n");
     }
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(5, 15, "5. Speaker Test");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(5, 35, "Did you hear a beep?");
-    u8g2.drawStr(5, 48, "If yes, amp works!");
-    u8g2.drawStr(5, 63, "Tap TOP to finish...");
-    u8g2.sendBuffer();
 }
 
-// === ALL DONE ===
+// === DONE ===
 void showDone() {
-    leds.clear();
-    for (int i = 0; i < NUM_LEDS; i++)
-        leds.setPixelColor(i, leds.Color(0, 255, 0));
-    leds.show();
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(15, 30, "All Done!");
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-    u8g2.drawStr(10, 50, "All tests complete.");
-    u8g2.sendBuffer();
+    static bool shown = false;
+    if (!shown) {
+        shown = true;
+        setAllLEDs(0, 255, 0);
+        Serial.println("=============================");
+        Serial.println("  ALL TESTS COMPLETE");
+        Serial.println("=============================");
+        Serial.println("\nOLED was skipped - check I2C wiring:");
+        Serial.println("  SDA = GPIO 21");
+        Serial.println("  SCL = GPIO 22");
+        Serial.println("  Make sure SDA/SCL aren't swapped");
+        Serial.println("  Check OLED VCC is on 3.3V, not 5V");
+    }
 }
