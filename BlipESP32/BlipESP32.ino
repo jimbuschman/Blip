@@ -179,13 +179,17 @@ int pickRandomSound(int category, int numSounds) {
 }
 
 void playSound(const char* path) {
+    Serial.print("playSound: ");
+    Serial.println(path);
     if (!LittleFS.exists(path)) {
         Serial.print("Sound not found: ");
         Serial.println(path);
         return;
     }
     File file = LittleFS.open(path, "r");
-    if (!file) return;
+    if (!file) { Serial.println("Failed to open file"); return; }
+
+    Serial.printf("File size: %d bytes\n", file.size());
 
     // Skip WAV header (44 bytes)
     file.seek(44);
