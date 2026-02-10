@@ -257,9 +257,12 @@ void playSound(const char* path) {
     }
     file.close();
 
-    // Flush with silence
+    // Flush all DMA buffers with silence
     memset(i2sBuf, 0, sizeof(i2sBuf));
-    i2s_write(I2S_NUM_0, i2sBuf, 512, &bytes_written, portMAX_DELAY);
+    for (int i = 0; i < 8; i++) {
+        i2s_write(I2S_NUM_0, i2sBuf, sizeof(i2sBuf), &bytes_written, portMAX_DELAY);
+    }
+    i2s_zero_dma_buffer(I2S_NUM_0);
     Serial.println("Playback done.");
 }
 
