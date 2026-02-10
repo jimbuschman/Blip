@@ -24,6 +24,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <FS.h>
 #include <LittleFS.h>
+#include <driver/adc.h>
 #include "Face.h"
 #include "Audio.h"
 
@@ -882,7 +883,7 @@ void processBackTouch(bool pressed) {
 // === SENSOR READING ===
 bool readTopTouch() { return digitalRead(TOUCH_TOP_PIN) == HIGH; }
 bool readBackTouch() { return digitalRead(TOUCH_BACK_PIN) == HIGH; }
-int readLightLevel() { return analogRead(LIGHT_SENSOR_PIN); }
+int readLightLevel() { return adc1_get_raw(ADC1_CHANNEL_6); } // GPIO 34 = ADC1 CH6
 
 // === IDLE BEHAVIORS ===
 void doIdleBehaviors() {
@@ -907,8 +908,9 @@ void setup() {
     
     pinMode(TOUCH_TOP_PIN, INPUT);
     pinMode(TOUCH_BACK_PIN, INPUT);
-    pinMode(LIGHT_SENSOR_PIN, INPUT);
-    
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+
     if (!LittleFS.begin(true)) {
         Serial.println("LittleFS failed!");
     }
