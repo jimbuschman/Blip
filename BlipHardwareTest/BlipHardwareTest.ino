@@ -46,7 +46,7 @@ void setup() {
         int chunk = 64;
         if (written + chunk > total_samples) chunk = total_samples - written;
         for (int i = 0; i < chunk; i++) {
-            int16_t val = (int16_t)(sin(2.0 * 3.14159 * 440 * (written + i) / (float)sample_rate) * 16000);
+            int16_t val = (int16_t)(sin(2.0 * 3.14159 * 440 * (written + i) / (float)sample_rate) * 3000);
             samples[i * 2] = val;
             samples[i * 2 + 1] = val;
         }
