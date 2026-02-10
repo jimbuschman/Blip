@@ -117,11 +117,9 @@ int lastSoundIndex[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 // === SOUND CATEGORIES ===
 const char* happySounds[] = {
     "/happy/happy_01.wav", "/happy/happy_02.wav", "/happy/happy_03.wav",
-    "/happy/happy_04.wav", "/happy/happy_05.wav", "/happy/happy_06.wav",
-    "/happy/happy_07.wav", "/happy/happy_08.wav", "/happy/happy_09.wav",
-    "/happy/happy_10.wav"
+    "/happy/happy_04.wav", "/happy/happy_05.wav", "/happy/happy_06.wav"
 };
-const int numHappySounds = 10;
+const int numHappySounds = 6;
 
 const char* annoyedSounds[] = {
     "/annoyed/annoyed_01.wav", "/annoyed/annoyed_02.wav", "/annoyed/annoyed_03.wav",
@@ -141,9 +139,9 @@ const int numSurprisedSounds = 8;
 
 const char* sleepySounds[] = {
     "/sleepy/sleepy_01.wav", "/sleepy/sleepy_02.wav", "/sleepy/sleepy_03.wav",
-    "/sleepy/sleepy_04.wav", "/sleepy/sleepy_05.wav", "/sleepy/sleepy_06.wav"
+    "/sleepy/sleepy_04.wav", "/sleepy/sleepy_05.wav"
 };
-const int numSleepySounds = 6;
+const int numSleepySounds = 5;
 
 const char* wakeSounds[] = {
     "/wake/wake_01.wav", "/wake/wake_02.wav", "/wake/wake_03.wav",
