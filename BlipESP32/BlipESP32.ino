@@ -214,6 +214,7 @@ void playSound(const char* path) {
     // Flush with silence
     memset(i2sBuf, 0, sizeof(i2sBuf));
     i2s_write(I2S_NUM_0, i2sBuf, 512, &bytes_written, portMAX_DELAY);
+    Serial.println("Playback done.");
 }
 
 void playHappySound() { playSound(happySounds[pickRandomSound(0, numHappySounds)]); }
