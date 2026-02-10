@@ -1,43 +1,50 @@
 /***************************************************
- * OLED Only Test
+ * OLED + Touch Sensor Test
  *
- * Just the ESP32 + OLED display, nothing else.
- * SDA = GPIO 21, SCL = GPIO 22
+ * ESP32 + OLED + two TTP223 touch sensors.
+ * Top = GPIO 4, Back = GPIO 17
  ****************************************************/
 
 #include <Wire.h>
 #include <U8g2lib.h>
+
+#define TOUCH_TOP_PIN   4
+#define TOUCH_BACK_PIN  17
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
 void setup() {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("=== OLED Only Test ===");
+    Serial.println("=== OLED + Touch Test ===");
 
-    Serial.println("Starting I2C scan...");
-    Wire.begin(21, 22);
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.print("  Found device at 0x");
-            Serial.println(addr, HEX);
-        }
-    }
-    Serial.println("I2C scan done.");
+    pinMode(TOUCH_TOP_PIN, INPUT);
+    pinMode(TOUCH_BACK_PIN, INPUT);
 
-    Serial.println("Initializing OLED...");
     u8g2.begin();
-    Serial.println("OLED initialized.");
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB10_tr);
-    u8g2.drawStr(20, 35, "Hello Blip!");
-    u8g2.sendBuffer();
-    Serial.println("Text sent to display.");
+    Serial.println("Ready. Touch the sensors.");
 }
 
 void loop() {
-    delay(1000);
-    Serial.println("alive");
+    bool top = digitalRead(TOUCH_TOP_PIN) == HIGH;
+    bool back = digitalRead(TOUCH_BACK_PIN) == HIGH;
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB10_tr);
+    u8g2.drawStr(5, 15, "Touch Test");
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+
+    char buf[32];
+    sprintf(buf, "Top:  %s", top ? "PRESSED" : "---");
+    u8g2.drawStr(5, 35, buf);
+    sprintf(buf, "Back: %s", back ? "PRESSED" : "---");
+    u8g2.drawStr(5, 50, buf);
+    u8g2.sendBuffer();
+
+    Serial.print("Top: ");
+    Serial.print(top ? "PRESSED" : "---");
+    Serial.print("  Back: ");
+    Serial.println(back ? "PRESSED" : "---");
+
+    delay(200);
 }
