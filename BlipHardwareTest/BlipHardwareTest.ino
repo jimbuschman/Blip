@@ -1,42 +1,28 @@
 /***************************************************
- * OLED Screen Test
+ * I2C Scanner - find devices on the bus
  ****************************************************/
 
 #include <Wire.h>
-#include <U8g2lib.h>
-
-#define TOUCH_TOP_PIN   4
-#define TOUCH_BACK_PIN  17
-
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0);
 
 void setup() {
     Serial.begin(115200);
     delay(2000);
-    Serial.println("=== OLED Test ===");
+    Serial.println("=== I2C Scanner ===");
 
-    pinMode(TOUCH_TOP_PIN, INPUT);
-    pinMode(TOUCH_BACK_PIN, INPUT);
+    Wire.begin(21, 22);
+    Serial.println("Scanning...");
 
-    u8g2.begin();
-    Serial.println("OLED initialized.");
+    int found = 0;
+    for (byte addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.printf("Found device at 0x%02X\n", addr);
+            found++;
+        }
+    }
+    Serial.printf("Scan done. %d device(s) found.\n", found);
 }
 
 void loop() {
-    bool top = digitalRead(TOUCH_TOP_PIN) == HIGH;
-    bool back = digitalRead(TOUCH_BACK_PIN) == HIGH;
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_ncenB08_tr);
-
-    char buf[32];
-    u8g2.drawStr(20, 15, "SCREEN TEST");
-    sprintf(buf, "Top:  %s", top ? "PRESSED" : "---");
-    u8g2.drawStr(5, 30, buf);
-    sprintf(buf, "Back: %s", back ? "PRESSED" : "---");
-    u8g2.drawStr(5, 45, buf);
-    u8g2.drawStr(5, 60, "Screen OK!");
-    u8g2.sendBuffer();
-
-    delay(50);
+    delay(10000);
 }
