@@ -9,7 +9,7 @@ void setup() {
     delay(2000);
     Serial.println("=== I2C Scanner ===");
 
-    Wire.begin(21, 22);
+    Wire.begin(4, 17);  // Using GPIO 4 (SDA) and GPIO 17 (SCL) to test
     Serial.println("Scanning...");
 
     int found = 0;
